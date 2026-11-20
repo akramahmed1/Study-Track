@@ -21,7 +21,8 @@
 
   <div id="app">
     <main id="main" tabindex="-1">
-      <h1 class="page-title">Dashboard</h1>
+      <div id="view-dashboard">
+      <h1 class="page-title" id="dashboard-title" tabindex="-1">Dashboard</h1>
 
       <section aria-labelledby="counts-heading">
         <h2 id="counts-heading" class="section-label">At a glance</h2>
@@ -57,7 +58,10 @@
       </section>
 
       <section aria-labelledby="list-heading">
-        <h2 id="list-heading" class="section-label">Assignments</h2>
+        <div class="section-head">
+          <h2 id="list-heading" class="section-label">Assignments</h2>
+          <button type="button" class="btn btn-strong" id="new-assignment">New assignment</button>
+        </div>
         <p id="empty-message" class="empty">No assignments yet. They will appear here, soonest due date first.</p>
         <ul id="assignment-list" class="assignment-list"></ul>
       </section>
@@ -65,6 +69,55 @@
       <p class="note">
         Reminders only work while this page is open. Always rely on your official course deadlines.
       </p>
+      </div><!-- /view-dashboard -->
+
+      <div id="view-form" hidden>
+        <h1 class="page-title" id="form-title" tabindex="-1">New assignment</h1>
+        <form id="assignment-form" novalidate>
+          <div class="field">
+            <label for="f-title">Title (required)</label>
+            <input id="f-title" type="text" maxlength="120" autocomplete="off" aria-required="true" aria-describedby="err-title">
+            <p id="err-title" class="field-error" role="alert"></p>
+          </div>
+          <div class="field">
+            <label for="f-course">Course (required)</label>
+            <select id="f-course" aria-required="true" aria-describedby="help-course err-course"></select>
+            <p id="help-course" class="help"></p>
+            <p id="err-course" class="field-error" role="alert"></p>
+          </div>
+          <div class="field">
+            <label for="f-due">Due date and time (required)</label>
+            <input id="f-due" type="datetime-local" aria-required="true" aria-describedby="err-due">
+            <p id="err-due" class="field-error" role="alert"></p>
+          </div>
+          <div class="field">
+            <label for="f-reminder">Reminder date and time (optional)</label>
+            <input id="f-reminder" type="datetime-local" aria-describedby="help-reminder err-reminder">
+            <p id="help-reminder" class="help">Must be at or before the due date. Reminders only appear while StudyTrack is open.</p>
+            <p id="err-reminder" class="field-error" role="alert"></p>
+          </div>
+          <div class="field">
+            <label for="f-notes">Notes (optional)</label>
+            <textarea id="f-notes" rows="4" maxlength="1000" aria-describedby="err-notes"></textarea>
+            <p id="err-notes" class="field-error" role="alert"></p>
+          </div>
+          <p id="form-error" class="field-error" role="alert"></p>
+          <div class="actions actions-left">
+            <button type="submit" class="btn btn-strong">Save assignment</button>
+            <button type="button" class="btn" id="form-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="view-details" hidden>
+        <h1 class="page-title" id="details-title" tabindex="-1">Assignment</h1>
+        <p id="details-status-msg" class="saved-msg" role="status"></p>
+        <dl class="details" id="details-list"></dl>
+        <div class="actions actions-left" id="details-actions">
+          <button type="button" class="btn btn-strong" id="details-edit">Edit</button>
+          <button type="button" class="btn" id="details-back">Back to dashboard</button>
+        </div>
+      </div>
     </main>
   </div>
 

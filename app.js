@@ -180,6 +180,111 @@
     return data.courses.length < before ? { ok: true } : { ok: false, reason: 'missing' };
   }
 
+  /* ---- Assignments ---- */
+  var TITLE_MAX = 120;
+  var NOTES_MAX = 1000;
+
+  function parseDateInput(value) {
+    if (!value) { return null; }
+    var d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /* Validates raw form input. Accepts datetime-local strings or ISO strings for dueAt/reminderAt.
+   * Returns { ok, errors: {field: message}, clean: {...ready to save...} }. Nothing is saved here. */
+  function validateAssignment(data, input) {
+    input = input || {};
+    var errors = {};
+    var title = (input.title || '').trim();
+    if (!title) { errors.title = 'Enter a title.'; }
+    else if (title.length > TITLE_MAX) { errors.title = 'The title can be at most ' + TITLE_MAX + ' characters.'; }
+
+    if (!input.courseId) { errors.courseId = 'Choose a course.'; }
+    else if (!data.courses.some(function (c) { return c.id === input.courseId; })) {
+      errors.courseId = 'That course no longer exists. Choose another course.';
+    }
+
+    var due = parseDateInput(input.dueAt);
+    if (!input.dueAt) { errors.dueAt = 'Enter a due date and time.'; }
+    else if (!due) { errors.dueAt = 'Enter a valid due date and time.'; }
+
+    var reminder = null;
+    if (input.reminderAt) {
+      reminder = parseDateInput(input.reminderAt);
+      if (!reminder) { errors.reminderAt = 'Enter a valid reminder date and time.'; }
+      else if (due && reminder.getTime() > due.getTime()) {
+        errors.reminderAt = 'The reminder must be at or before the due date and time.';
+      }
+    }
+
+    var notes = input.notes || '';
+    if (notes.length > NOTES_MAX) { errors.notes = 'Notes can be at most ' + NOTES_MAX + ' characters.'; }
+
+    var ok = Object.keys(errors).length === 0;
+    return {
+      ok: ok,
+      errors: errors,
+      clean: ok ? {
+        title: title,
+        courseId: input.courseId,
+        dueAt: due.toISOString(),
+        reminderAt: reminder ? reminder.toISOString() : null,
+        notes: notes.trim()
+      } : null
+    };
+  }
+
+  function getAssignment(data, id) {
+    return data.assignments.filter(function (a) { return a.id === id; })[0] || null;
+  }
+
+  function createAssignment(data, input, now) {
+    var v = validateAssignment(data, input);
+    if (!v.ok) { return { ok: false, errors: v.errors }; }
+    var stamp = (now === undefined ? new Date() : new Date(now)).toISOString();
+    var a = {
+      id: newId('a_'),
+      title: v.clean.title,
+      courseId: v.clean.courseId,
+      dueAt: v.clean.dueAt,
+      reminderAt: v.clean.reminderAt,
+      notes: v.clean.notes,
+      completed: false,
+      completedAt: null,
+      createdAt: stamp,
+      updatedAt: stamp
+    };
+    data.assignments.push(a);
+    return { ok: true, assignment: a };
+  }
+
+  function updateAssignment(data, id, input, now) {
+    var a = getAssignment(data, id);
+    if (!a) { return { ok: false, errors: { form: 'This assignment no longer exists.' } }; }
+    var v = validateAssignment(data, input);
+    if (!v.ok) { return { ok: false, errors: v.errors }; }
+    a.title = v.clean.title;
+    a.courseId = v.clean.courseId;
+    a.dueAt = v.clean.dueAt;
+    a.reminderAt = v.clean.reminderAt;
+    a.notes = v.clean.notes;
+    a.updatedAt = (now === undefined ? new Date() : new Date(now)).toISOString();
+    return { ok: true, assignment: a };
+  }
+
+  /* Soonest due date first (ties broken by title). Returns a new array. */
+  function sortByDue(assignments) {
+    return assignments.slice().sort(function (x, y) {
+      var d = new Date(x.dueAt).getTime() - new Date(y.dueAt).getTime();
+      return d !== 0 ? d : x.title.localeCompare(y.title);
+    });
+  }
+
+  function courseName(data, id) {
+    var c = data.courses.filter(function (x) { return x.id === id; })[0];
+    return c ? c.name : '(deleted course)';
+  }
+
   var api = {
     SCHEMA_VERSION: SCHEMA_VERSION,
     DEFAULT_KEY: DEFAULT_KEY,
@@ -192,7 +297,12 @@
     addCourse: addCourse,
     renameCourse: renameCourse,
     deleteCourse: deleteCourse,
-    assignmentsInCourse: assignmentsInCourse
+    assignmentsInCourse: assignmentsInCourse,
+    validateAssignment: validateAssignment,
+    createAssignment: createAssignment,
+    updateAssignment: updateAssignment,
+    getAssignment: getAssignment,
+    sortByDue: sortByDue
   };
   global.StudyTrack = api;
 
@@ -330,6 +440,7 @@
       var btn = list.querySelector('button[data-course-id="' + focusAfter.rename + '"]');
       if (btn) { btn.focus(); }
     }
+    renderAssignmentList(store);
   }
 
   function onDeleteCourse(store, course) {
@@ -363,6 +474,175 @@
       input.value = '';
       renderCourses(store);
       input.focus();
+    });
+  }
+
+  /* ---- Assignments UI: list, form, details ---- */
+  var STATUS_LABEL = { upcoming: 'Upcoming', overdue: 'Overdue', completed: 'Completed' };
+
+  function formatDateTime(iso) {
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* ISO string -> value for <input type="datetime-local"> in local time */
+  function toLocalInput(iso) {
+    if (!iso) { return ''; }
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) { return ''; }
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+      'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+
+  var ui = { view: 'dashboard', editingId: null, detailsId: null };
+
+  function showView(name) {
+    ['dashboard', 'form', 'details'].forEach(function (v) {
+      document.getElementById('view-' + v).hidden = (v !== name);
+    });
+    ui.view = name;
+    window.scrollTo(0, 0);
+    var heading = { dashboard: 'dashboard-title', form: 'form-title', details: 'details-title' }[name];
+    document.getElementById(heading).focus();
+  }
+
+  function refreshDashboard(store) {
+    renderDashboard(store.getData());
+    renderAssignmentList(store);
+  }
+
+  function statusBadge(status) {
+    return el('span', 'status status-' + status, STATUS_LABEL[status]);
+  }
+
+  function renderAssignmentList(store) {
+    var data = store.getData();
+    var list = document.getElementById('assignment-list');
+    list.textContent = '';
+    sortByDue(data.assignments).forEach(function (a) {
+      var li = el('li');
+      var row = el('button', 'assignment-row');
+      row.type = 'button';
+      row.dataset.assignmentId = a.id;
+      row.appendChild(el('span', 'assignment-title', a.title));
+      row.appendChild(el('span', 'assignment-meta', courseName(data, a.courseId) + ' \u00B7 Due ' + formatDateTime(a.dueAt)));
+      row.appendChild(statusBadge(statusOf(a)));
+      row.addEventListener('click', function () { openDetails(store, a.id); });
+      li.appendChild(row);
+      list.appendChild(li);
+    });
+  }
+
+  function dlRow(dl, term, valueNode) {
+    dl.appendChild(el('dt', '', term));
+    var dd = el('dd');
+    dd.appendChild(valueNode);
+    dl.appendChild(dd);
+  }
+
+  function openDetails(store, id, savedMessage) {
+    var data = store.getData();
+    var a = getAssignment(data, id);
+    if (!a) { showView('dashboard'); return; }
+    ui.detailsId = id;
+    document.getElementById('details-title').textContent = a.title;
+    document.getElementById('details-status-msg').textContent = savedMessage || '';
+    var dl = document.getElementById('details-list');
+    dl.textContent = '';
+    dlRow(dl, 'Status', statusBadge(statusOf(a)));
+    dlRow(dl, 'Course', document.createTextNode(courseName(data, a.courseId)));
+    dlRow(dl, 'Due', document.createTextNode(formatDateTime(a.dueAt)));
+    dlRow(dl, 'Reminder', document.createTextNode(a.reminderAt ? formatDateTime(a.reminderAt) : 'None'));
+    var notes = el('span', 'notes-text', a.notes ? a.notes : 'None');
+    dlRow(dl, 'Notes', notes);
+    if (a.completed && a.completedAt) { dlRow(dl, 'Completed', document.createTextNode(formatDateTime(a.completedAt))); }
+    dlRow(dl, 'Created', document.createTextNode(formatDateTime(a.createdAt)));
+    dlRow(dl, 'Last changed', document.createTextNode(formatDateTime(a.updatedAt)));
+    showView('details');
+  }
+
+  var FORM_FIELDS = [
+    { key: 'title', input: 'f-title', error: 'err-title' },
+    { key: 'courseId', input: 'f-course', error: 'err-course' },
+    { key: 'dueAt', input: 'f-due', error: 'err-due' },
+    { key: 'reminderAt', input: 'f-reminder', error: 'err-reminder' },
+    { key: 'notes', input: 'f-notes', error: 'err-notes' }
+  ];
+
+  function clearFormErrors() {
+    FORM_FIELDS.forEach(function (f) {
+      setFieldError(document.getElementById(f.input), document.getElementById(f.error), '');
+    });
+    document.getElementById('form-error').textContent = '';
+  }
+
+  function openForm(store, id) {
+    var data = store.getData();
+    var a = id ? getAssignment(data, id) : null;
+    ui.editingId = a ? a.id : null;
+    clearFormErrors();
+    document.getElementById('form-title').textContent = a ? 'Edit assignment' : 'New assignment';
+
+    var select = document.getElementById('f-course');
+    select.textContent = '';
+    var placeholder = el('option', '', 'Choose a course');
+    placeholder.value = '';
+    select.appendChild(placeholder);
+    data.courses.forEach(function (c) {
+      var o = el('option', '', c.name);
+      o.value = c.id;
+      select.appendChild(o);
+    });
+    document.getElementById('help-course').textContent = data.courses.length
+      ? '' : 'You have no courses yet. Cancel, add a course on the dashboard, then come back.';
+
+    document.getElementById('f-title').value = a ? a.title : '';
+    select.value = a ? a.courseId : '';
+    document.getElementById('f-due').value = a ? toLocalInput(a.dueAt) : '';
+    document.getElementById('f-reminder').value = a ? toLocalInput(a.reminderAt) : '';
+    document.getElementById('f-notes').value = a ? a.notes : '';
+    showView('form');
+  }
+
+  function initAssignmentUi(store) {
+    document.getElementById('new-assignment').addEventListener('click', function () { openForm(store, null); });
+    document.getElementById('details-back').addEventListener('click', function () { showView('dashboard'); });
+    document.getElementById('details-edit').addEventListener('click', function () { openForm(store, ui.detailsId); });
+    document.getElementById('form-cancel').addEventListener('click', function () {
+      if (ui.editingId && getAssignment(store.getData(), ui.editingId)) { openDetails(store, ui.editingId); }
+      else { showView('dashboard'); }
+    });
+
+    document.getElementById('assignment-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var data = store.getData();
+      var input = {
+        title: document.getElementById('f-title').value,
+        courseId: document.getElementById('f-course').value,
+        dueAt: document.getElementById('f-due').value,
+        reminderAt: document.getElementById('f-reminder').value,
+        notes: document.getElementById('f-notes').value
+      };
+      var result = ui.editingId ? updateAssignment(data, ui.editingId, input) : createAssignment(data, input);
+      clearFormErrors();
+      if (!result.ok) {
+        var firstBad = null;
+        FORM_FIELDS.forEach(function (f) {
+          if (result.errors[f.key]) {
+            var inputEl = document.getElementById(f.input);
+            setFieldError(inputEl, document.getElementById(f.error), result.errors[f.key]);
+            if (!firstBad) { firstBad = inputEl; }
+          }
+        });
+        if (result.errors.form) { document.getElementById('form-error').textContent = 'Error: ' + result.errors.form; }
+        if (firstBad) { firstBad.focus(); }
+        return; // nothing invalid is saved
+      }
+      store.save();
+      refreshDashboard(store);
+      openDetails(store, result.assignment.id, 'Assignment saved.');
     });
   }
 
@@ -403,6 +683,7 @@
     renderDashboard(store.getData());
     renderCourses(store);
     initCourseForm(store);
+    initAssignmentUi(store);
     global.StudyTrackApp = { store: store, confirmDialog: confirmDialog };
   }
 

@@ -126,3 +126,39 @@ input[aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
 .course-name { font-weight: 600; }
 .course-count { color: var(--grey); font-size: 0.95rem; }
 .course-actions { display: flex; gap: 0.5rem; }
+
+/* Assignments, form, details */
+[hidden] { display: none !important; }
+.section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.section-head .section-label { margin: 1.5rem 0 0.75rem; }
+.assignment-row {
+  display: grid; gap: 0.15rem; width: 100%; text-align: left;
+  font: inherit; color: var(--graphite); background: var(--paper);
+  border: 2px solid var(--grey); border-radius: 6px; padding: 0.6rem 0.75rem; margin-top: 0.5rem; cursor: pointer;
+}
+.assignment-row:hover { background: #F2F2F2; }
+.assignment-title { font-weight: 600; overflow-wrap: anywhere; }
+.assignment-meta { color: var(--grey); font-size: 0.95rem; overflow-wrap: anywhere; }
+.status {
+  justify-self: start; font-size: 0.9rem; font-weight: 700; padding: 0 0.5rem;
+  border: 2px solid var(--grey); border-radius: 999px; color: var(--graphite);
+}
+.status-overdue { border-color: var(--graphite); border-width: 3px; }
+.status-overdue::before { content: "\26A0\00A0"; } /* warning sign + text label: never colour alone */
+.status-completed::before { content: "\2713\00A0"; }
+.field { margin-bottom: 1rem; }
+.field input[type="text"], .field input[type="datetime-local"], .field select, .field textarea {
+  display: block; width: 100%; font: inherit; color: var(--graphite); background: var(--paper);
+  border: 2px solid var(--grey); border-radius: 6px; padding: 0.5rem 0.75rem; min-height: 2.75rem;
+}
+.field textarea { resize: vertical; }
+.field [aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
+.help { color: var(--grey); font-size: 0.95rem; margin: 0.25rem 0 0; }
+.help:empty { display: none; }
+.actions-left { justify-content: flex-start; }
+.details { margin: 0 0 1rem; }
+.details dt { font-weight: 700; margin-top: 0.75rem; color: var(--grey); }
+.details dd { margin: 0; overflow-wrap: anywhere; }
+.notes-text { white-space: pre-wrap; }
+.saved-msg { font-weight: 600; margin: 0 0 0.5rem; }
+.saved-msg:empty { display: none; }
