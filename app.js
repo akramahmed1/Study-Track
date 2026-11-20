@@ -285,6 +285,51 @@
     return c ? c.name : '(deleted course)';
   }
 
+  /* ---- Complete / reopen / delete / filter / progress ---- */
+  function stamp(now) { return (now === undefined ? new Date() : new Date(now)).toISOString(); }
+
+  function completeAssignment(data, id, now) {
+    var a = getAssignment(data, id);
+    if (!a) { return { ok: false }; }
+    a.completed = true;
+    a.completedAt = stamp(now);
+    a.updatedAt = a.completedAt;
+    return { ok: true, assignment: a };
+  }
+
+  function reopenAssignment(data, id, now) {
+    var a = getAssignment(data, id);
+    if (!a) { return { ok: false }; }
+    a.completed = false;
+    a.completedAt = null;
+    a.updatedAt = stamp(now);
+    return { ok: true, assignment: a };
+  }
+
+  function deleteAssignment(data, id) {
+    var before = data.assignments.length;
+    data.assignments = data.assignments.filter(function (a) { return a.id !== id; });
+    return { ok: data.assignments.length < before };
+  }
+
+  /* filter: { status: 'all'|'upcoming'|'overdue'|'completed', courseId: '' (all courses) }
+   * Result is sorted soonest due date first. */
+  function filterAssignments(data, filter, now) {
+    filter = filter || {};
+    var status = filter.status || 'all';
+    return sortByDue(data.assignments).filter(function (a) {
+      if (filter.courseId && a.courseId !== filter.courseId) { return false; }
+      return status === 'all' || statusOf(a, now) === status;
+    });
+  }
+
+  /* Progress is always calculated from saved records, never typed in. */
+  function courseProgress(data, courseId) {
+    var mine = data.assignments.filter(function (a) { return a.courseId === courseId; });
+    var done = mine.filter(function (a) { return a.completed; }).length;
+    return { total: mine.length, completed: done, percent: mine.length ? Math.round(done * 100 / mine.length) : 0 };
+  }
+
   var api = {
     SCHEMA_VERSION: SCHEMA_VERSION,
     DEFAULT_KEY: DEFAULT_KEY,
@@ -302,7 +347,12 @@
     createAssignment: createAssignment,
     updateAssignment: updateAssignment,
     getAssignment: getAssignment,
-    sortByDue: sortByDue
+    sortByDue: sortByDue,
+    completeAssignment: completeAssignment,
+    reopenAssignment: reopenAssignment,
+    deleteAssignment: deleteAssignment,
+    filterAssignments: filterAssignments,
+    courseProgress: courseProgress
   };
   global.StudyTrack = api;
 
@@ -418,6 +468,17 @@
       var info = el('div', 'course-info');
       info.appendChild(el('span', 'course-name', course.name));
       info.appendChild(el('span', 'course-count', count + (count === 1 ? ' assignment' : ' assignments')));
+      var prog = courseProgress(data, course.id);
+      if (prog.total === 0) {
+        info.appendChild(el('span', 'course-progress-text', 'Progress: no assignments yet'));
+      } else {
+        info.appendChild(el('span', 'course-progress-text',
+          'Progress: ' + prog.completed + ' of ' + prog.total + ' completed (' + prog.percent + '%)'));
+        var bar = el('progress', 'course-progress');
+        bar.max = 100; bar.value = prog.percent;
+        bar.setAttribute('aria-label', 'Progress for ' + course.name + ': ' + prog.percent + ' percent completed');
+        info.appendChild(bar);
+      }
       var actions = el('div', 'course-actions');
       var rename = el('button', 'btn', 'Rename');
       rename.type = 'button';
@@ -496,7 +557,7 @@
       'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
 
-  var ui = { view: 'dashboard', editingId: null, detailsId: null };
+  var ui = { view: 'dashboard', editingId: null, detailsId: null, filter: { status: 'all', courseId: '' } };
 
   function showView(name) {
     ['dashboard', 'form', 'details'].forEach(function (v) {
@@ -510,18 +571,40 @@
 
   function refreshDashboard(store) {
     renderDashboard(store.getData());
-    renderAssignmentList(store);
+    renderCourses(store); // also redraws the assignment list and course progress
   }
 
   function statusBadge(status) {
     return el('span', 'status status-' + status, STATUS_LABEL[status]);
   }
 
+  function renderCourseFilter(data) {
+    var select = document.getElementById('filter-course');
+    var valid = data.courses.some(function (c) { return c.id === ui.filter.courseId; });
+    if (!valid) { ui.filter.courseId = ''; }
+    select.textContent = '';
+    var all = el('option', '', 'All courses');
+    all.value = '';
+    select.appendChild(all);
+    data.courses.forEach(function (c) {
+      var o = el('option', '', c.name);
+      o.value = c.id;
+      select.appendChild(o);
+    });
+    select.value = ui.filter.courseId;
+  }
+
   function renderAssignmentList(store) {
     var data = store.getData();
+    renderCourseFilter(data);
+    Array.prototype.forEach.call(document.querySelectorAll('.filter-btn'), function (b) {
+      b.setAttribute('aria-pressed', b.dataset.status === ui.filter.status ? 'true' : 'false');
+    });
     var list = document.getElementById('assignment-list');
     list.textContent = '';
-    sortByDue(data.assignments).forEach(function (a) {
+    var shown = filterAssignments(data, ui.filter);
+    document.getElementById('no-match').hidden = !(data.assignments.length > 0 && shown.length === 0);
+    shown.forEach(function (a) {
       var li = el('li');
       var row = el('button', 'assignment-row');
       row.type = 'button';
@@ -542,7 +625,7 @@
     dl.appendChild(dd);
   }
 
-  function openDetails(store, id, savedMessage) {
+  function openDetails(store, id, savedMessage, focusId) {
     var data = store.getData();
     var a = getAssignment(data, id);
     if (!a) { showView('dashboard'); return; }
@@ -560,7 +643,9 @@
     if (a.completed && a.completedAt) { dlRow(dl, 'Completed', document.createTextNode(formatDateTime(a.completedAt))); }
     dlRow(dl, 'Created', document.createTextNode(formatDateTime(a.createdAt)));
     dlRow(dl, 'Last changed', document.createTextNode(formatDateTime(a.updatedAt)));
+    document.getElementById('details-complete').textContent = a.completed ? 'Reopen' : 'Mark complete';
     showView('details');
+    if (focusId) { document.getElementById(focusId).focus(); }
   }
 
   var FORM_FIELDS = [
@@ -607,8 +692,41 @@
   }
 
   function initAssignmentUi(store) {
-    document.getElementById('new-assignment').addEventListener('click', function () { openForm(store, null); });
+    document.getElementById('new-assignment').addEventListener('click', function () { document.getElementById('dash-msg').textContent = ''; openForm(store, null); });
     document.getElementById('details-back').addEventListener('click', function () { showView('dashboard'); });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.filter-btn'), function (b) {
+      b.addEventListener('click', function () { ui.filter.status = b.dataset.status; renderAssignmentList(store); });
+    });
+    document.getElementById('filter-course').addEventListener('change', function (e) {
+      ui.filter.courseId = e.target.value;
+      renderAssignmentList(store);
+    });
+
+    document.getElementById('details-complete').addEventListener('click', function () {
+      var data = store.getData();
+      var a = getAssignment(data, ui.detailsId);
+      if (!a) { showView('dashboard'); return; }
+      var wasCompleted = a.completed;
+      if (wasCompleted) { reopenAssignment(data, a.id); } else { completeAssignment(data, a.id); }
+      store.save();
+      refreshDashboard(store);
+      openDetails(store, a.id, wasCompleted ? 'Assignment reopened.' : 'Assignment marked complete.', 'details-complete');
+    });
+
+    document.getElementById('details-delete').addEventListener('click', function () {
+      var data = store.getData();
+      var a = getAssignment(data, ui.detailsId);
+      if (!a) { showView('dashboard'); return; }
+      confirmDialog('Delete the assignment "' + a.title + '"? This cannot be undone.', 'Delete assignment').then(function (ok) {
+        if (!ok) { return; }
+        deleteAssignment(data, a.id);
+        store.save();
+        refreshDashboard(store);
+        document.getElementById('dash-msg').textContent = 'Assignment deleted.';
+        showView('dashboard');
+      });
+    });
     document.getElementById('details-edit').addEventListener('click', function () { openForm(store, ui.detailsId); });
     document.getElementById('form-cancel').addEventListener('click', function () {
       if (ui.editingId && getAssignment(store.getData(), ui.editingId)) { openDetails(store, ui.editingId); }

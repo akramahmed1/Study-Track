@@ -162,3 +162,15 @@ input[aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
 .notes-text { white-space: pre-wrap; }
 .saved-msg { font-weight: 600; margin: 0 0 0.5rem; }
 .saved-msg:empty { display: none; }
+
+/* Filters and progress */
+.filters { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: flex-end; margin-bottom: 0.75rem; }
+.filter-group { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.filter-btn[aria-pressed="true"] { background: var(--graphite); color: var(--paper); border-color: var(--graphite); font-weight: 700; }
+.filter-btn[aria-pressed="true"]::before { content: "\2713\00A0"; }
+.filter-course select {
+  font: inherit; color: var(--graphite); background: var(--paper);
+  border: 2px solid var(--grey); border-radius: 6px; padding: 0.5rem 0.75rem; min-height: 2.75rem; max-width: 100%;
+}
+.course-progress-text { font-size: 0.95rem; }
+.course-progress { width: 100%; max-width: 16rem; height: 0.9rem; accent-color: var(--graphite); }
