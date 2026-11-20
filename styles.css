@@ -1,0 +1,104 @@
+/* StudyTrack styles. Palette (contrast ratios are listed in docs/DESIGN.md):
+   #FFFFFF background, #1F1F1F main text, #5E5E5E secondary text/borders/controls.
+   #9A9A9A is DECORATIVE ONLY (sketch underlines) - never text, borders or controls. */
+:root {
+  --paper: #FFFFFF;
+  --graphite: #1F1F1F;
+  --grey: #5E5E5E;
+  --pencil: #9A9A9A; /* decorative strokes only */
+  --font-body: "Segoe UI", system-ui, sans-serif;
+  --font-hand: "Segoe Print", "Comic Sans MS", cursive;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--graphite);
+  font-family: var(--font-body);
+  font-size: 1.0625rem; /* 17px */
+  line-height: 1.5;
+}
+
+h1, h2, .brand { font-family: var(--font-hand); font-weight: 700; margin: 0; }
+
+.page-title {
+  font-size: 2rem;
+  padding-bottom: 0.25rem;
+  margin-bottom: 1.25rem;
+  /* sketch-style underline: decorative only */
+  background: linear-gradient(var(--pencil), var(--pencil)) left bottom / 100% 3px no-repeat;
+}
+
+.section-label { font-size: 1.25rem; margin: 1.5rem 0 0.75rem; }
+
+.skip-link {
+  position: absolute; left: 0.5rem; top: -4rem;
+  background: var(--paper); color: var(--graphite);
+  border: 2px solid var(--graphite); padding: 0.5rem 0.75rem; z-index: 10;
+}
+.skip-link:focus { top: 0.5rem; }
+
+/* Visible keyboard focus on everything interactive */
+:focus-visible { outline: 3px solid var(--graphite); outline-offset: 2px; }
+
+.site-header { border-bottom: 2px solid var(--grey); }
+.header-inner {
+  max-width: 60rem; margin: 0 auto; padding: 0.75rem 1rem;
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.25rem 1rem;
+}
+.brand { font-size: 1.5rem; }
+.greeting { margin: 0; color: var(--grey); }
+
+#app { max-width: 60rem; margin: 0 auto; padding: 1rem; }
+#main:focus { outline: none; }
+
+.counts {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem;
+}
+.count-tile {
+  border: 2px solid var(--grey); border-radius: 6px;
+  padding: 0.75rem 0.5rem; text-align: center;
+}
+.count-number { display: block; font-family: var(--font-hand); font-size: 2rem; line-height: 1.2; }
+.count-label { display: block; color: var(--grey); }
+
+.empty { color: var(--grey); border: 2px dashed var(--grey); border-radius: 6px; padding: 1rem; margin: 0; }
+.assignment-list { list-style: none; margin: 0; padding: 0; }
+.note { color: var(--grey); margin-top: 2rem; }
+
+/* Banner for storage problems */
+#banner-area:empty { display: none; }
+.banner {
+  max-width: 60rem; margin: 0.75rem auto 0; padding: 0.75rem 1rem;
+  border: 3px solid var(--graphite); border-radius: 6px; background: var(--paper);
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; justify-content: space-between;
+}
+.banner-wrap { padding: 0 1rem; }
+.banner-title { font-weight: 700; }
+.banner p { margin: 0; }
+
+/* Buttons */
+.btn {
+  font: inherit; color: var(--graphite); background: var(--paper);
+  border: 2px solid var(--grey); border-radius: 6px;
+  padding: 0.5rem 1rem; min-height: 2.75rem; cursor: pointer;
+}
+.btn:hover { background: #F2F2F2; }
+.btn-strong { background: var(--graphite); color: var(--paper); border-color: var(--graphite); }
+.btn-strong:hover { background: #000000; }
+
+/* Dialog */
+dialog { max-width: min(28rem, calc(100vw - 2rem)); border: 3px solid var(--graphite); border-radius: 8px; padding: 1rem 1.25rem; color: var(--graphite); background: var(--paper); }
+dialog::backdrop { background: rgba(31, 31, 31, 0.6); }
+dialog .section-label { margin-top: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
+
+@media (max-width: 420px) {
+  .count-number { font-size: 1.6rem; }
+  .page-title { font-size: 1.6rem; }
+}

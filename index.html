@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StudyTrack</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <p class="brand">StudyTrack</p>
+      <p class="greeting" id="greeting">Hi there</p>
+    </div>
+  </header>
+
+  <!-- Storage / data warnings appear here (built with DOM methods in app.js) -->
+  <div id="banner-area" role="alert"></div>
+
+  <div id="app">
+    <main id="main" tabindex="-1">
+      <h1 class="page-title">Dashboard</h1>
+
+      <section aria-labelledby="counts-heading">
+        <h2 id="counts-heading" class="section-label">At a glance</h2>
+        <ul class="counts">
+          <li class="count-tile">
+            <span class="count-number" id="count-upcoming">0</span>
+            <span class="count-label">Upcoming</span>
+          </li>
+          <li class="count-tile">
+            <span class="count-number" id="count-overdue">0</span>
+            <span class="count-label">Overdue</span>
+          </li>
+          <li class="count-tile">
+            <span class="count-number" id="count-completed">0</span>
+            <span class="count-label">Completed</span>
+          </li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="list-heading">
+        <h2 id="list-heading" class="section-label">Assignments</h2>
+        <p id="empty-message" class="empty">No assignments yet. They will appear here, soonest due date first.</p>
+        <ul id="assignment-list" class="assignment-list"></ul>
+      </section>
+
+      <p class="note">
+        Reminders only work while this page is open. Always rely on your official course deadlines.
+      </p>
+    </main>
+  </div>
+
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h2 id="confirm-title" class="section-label">Please confirm</h2>
+      <p id="confirm-message"></p>
+      <div class="actions">
+        <button type="submit" value="cancel" class="btn" id="confirm-cancel">Cancel</button>
+        <button type="submit" value="ok" class="btn btn-strong" id="confirm-ok">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <noscript><p class="note">StudyTrack needs JavaScript turned on to work.</p></noscript>
+  <script src="app.js"></script>
+</body>
+</html>
