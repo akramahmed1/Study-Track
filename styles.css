@@ -174,3 +174,7 @@ input[aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
 }
 .course-progress-text { font-size: 0.95rem; }
 .course-progress { width: 100%; max-width: 16rem; height: 0.9rem; accent-color: var(--graphite); }
+
+/* Reminder banners */
+#reminder-area:empty { display: none; }
+.reminder-banner { border-style: double; border-width: 6px; }

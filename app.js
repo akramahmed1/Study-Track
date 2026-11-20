@@ -330,6 +330,32 @@
     return { total: mine.length, completed: done, percent: mine.length ? Math.round(done * 100 / mine.length) : 0 };
   }
 
+  /* ---- Reminders (only work while the app is open) ----
+   * The engine remembers when it last checked. A reminder fires when its time falls between the
+   * last check and now, so a reminder time that passed while the app was closed does not fire.
+   * It reads the current data each time, so edits are picked up automatically, and completed or
+   * deleted assignments never fire (cancelled). Each (assignment, reminder time) fires once. */
+  function createReminderEngine(getData, startTime) {
+    var lastCheck = startTime === undefined ? Date.now() : startTime;
+    var fired = {};
+    return {
+      check: function (now) {
+        var due = [];
+        getData().assignments.forEach(function (a) {
+          if (a.completed || !a.reminderAt) { return; }
+          var t = new Date(a.reminderAt).getTime();
+          var key = a.id + '|' + a.reminderAt;
+          if (t <= now && t > lastCheck && !fired[key]) {
+            fired[key] = true;
+            due.push(a);
+          }
+        });
+        lastCheck = now;
+        return due;
+      }
+    };
+  }
+
   var api = {
     SCHEMA_VERSION: SCHEMA_VERSION,
     DEFAULT_KEY: DEFAULT_KEY,
@@ -352,7 +378,8 @@
     reopenAssignment: reopenAssignment,
     deleteAssignment: deleteAssignment,
     filterAssignments: filterAssignments,
-    courseProgress: courseProgress
+    courseProgress: courseProgress,
+    createReminderEngine: createReminderEngine
   };
   global.StudyTrack = api;
 
@@ -709,6 +736,7 @@
       if (!a) { showView('dashboard'); return; }
       var wasCompleted = a.completed;
       if (wasCompleted) { reopenAssignment(data, a.id); } else { completeAssignment(data, a.id); }
+      if (!wasCompleted) { removeReminderBanner(a.id); } // completing cancels the reminder
       store.save();
       refreshDashboard(store);
       openDetails(store, a.id, wasCompleted ? 'Assignment reopened.' : 'Assignment marked complete.', 'details-complete');
@@ -721,6 +749,7 @@
       confirmDialog('Delete the assignment "' + a.title + '"? This cannot be undone.', 'Delete assignment').then(function (ok) {
         if (!ok) { return; }
         deleteAssignment(data, a.id);
+        removeReminderBanner(a.id); // deleting cancels the reminder
         store.save();
         refreshDashboard(store);
         document.getElementById('dash-msg').textContent = 'Assignment deleted.';
@@ -743,6 +772,8 @@
         reminderAt: document.getElementById('f-reminder').value,
         notes: document.getElementById('f-notes').value
       };
+      var before = ui.editingId ? getAssignment(data, ui.editingId) : null;
+      var oldReminder = before ? before.reminderAt : null;
       var result = ui.editingId ? updateAssignment(data, ui.editingId, input) : createAssignment(data, input);
       clearFormErrors();
       if (!result.ok) {
@@ -758,10 +789,74 @@
         if (firstBad) { firstBad.focus(); }
         return; // nothing invalid is saved
       }
+      if (ui.editingId && result.assignment.reminderAt !== oldReminder) { removeReminderBanner(ui.editingId); } // edit updates the reminder
       store.save();
       refreshDashboard(store);
       openDetails(store, result.assignment.id, 'Assignment saved.');
     });
+  }
+
+  /* ---- Reminders UI ---- */
+  var REMINDER_INTERVAL_MS = 30000; // check every 30 seconds
+  var reminderBanners = {};         // assignment id -> banner element
+
+  function removeReminderBanner(id) {
+    var node = reminderBanners[id];
+    if (node) { node.remove(); delete reminderBanners[id]; }
+  }
+
+  function showReminderBanner(store, a) {
+    removeReminderBanner(a.id);
+    var data = store.getData();
+    var wrap = el('div', 'banner-wrap');
+    var box = el('div', 'banner reminder-banner');
+    var text = el('div');
+    text.appendChild(el('p', 'banner-title', 'Reminder: ' + a.title));
+    text.appendChild(el('p', '', courseName(data, a.courseId) + ' \u00B7 Due ' + formatDateTime(a.dueAt)));
+    box.appendChild(text);
+    var actions = el('div', 'course-actions');
+    var view = el('button', 'btn', 'View');
+    view.type = 'button';
+    view.addEventListener('click', function () { removeReminderBanner(a.id); openDetails(store, a.id); });
+    var dismiss = el('button', 'btn btn-strong', 'Dismiss');
+    dismiss.type = 'button';
+    dismiss.setAttribute('aria-label', 'Dismiss reminder for ' + a.title);
+    dismiss.addEventListener('click', function () {
+      removeReminderBanner(a.id);
+      document.getElementById('main').focus();
+    });
+    actions.appendChild(view); actions.appendChild(dismiss);
+    box.appendChild(actions);
+    wrap.appendChild(box);
+    document.getElementById('reminder-area').appendChild(wrap);
+    reminderBanners[a.id] = wrap;
+  }
+
+  function statusSignature(data) {
+    return data.assignments.map(function (a) { return a.id + ':' + statusOf(a); }).join(',');
+  }
+
+  /* Runs every 30 seconds: fires due reminders and refreshes Overdue labels if time moved them. */
+  function startReminders(store) {
+    var engine = createReminderEngine(function () { return store.getData(); }, Date.now());
+    var lastSignature = statusSignature(store.getData());
+    function tick(nowMs) {
+      var now = nowMs === undefined ? Date.now() : nowMs;
+      engine.check(now).forEach(function (a) { showReminderBanner(store, a); });
+      var sig = statusSignature(store.getData());
+      if (sig !== lastSignature) {
+        lastSignature = sig;
+        renderDashboard(store.getData());
+        renderAssignmentList(store);
+        if (ui.view === 'details') {
+          var a = getAssignment(store.getData(), ui.detailsId);
+          var first = document.querySelector('#details-list dd');
+          if (a && first) { first.textContent = ''; first.appendChild(statusBadge(statusOf(a))); }
+        }
+      }
+    }
+    setInterval(function () { tick(); }, REMINDER_INTERVAL_MS);
+    return tick;
   }
 
   function init() {
@@ -802,7 +897,8 @@
     renderCourses(store);
     initCourseForm(store);
     initAssignmentUi(store);
-    global.StudyTrackApp = { store: store, confirmDialog: confirmDialog };
+    var tick = startReminders(store);
+    global.StudyTrackApp = { store: store, confirmDialog: confirmDialog, checkReminders: tick };
   }
 
   if (typeof document !== 'undefined' && document.getElementById('app')) {
