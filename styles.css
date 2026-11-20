@@ -102,3 +102,27 @@ dialog .section-label { margin-top: 0; }
   .count-number { font-size: 1.6rem; }
   .page-title { font-size: 1.6rem; }
 }
+
+/* Forms and courses */
+label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+input[type="text"] {
+  font: inherit; color: var(--graphite); background: var(--paper);
+  border: 2px solid var(--grey); border-radius: 6px;
+  padding: 0.5rem 0.75rem; min-height: 2.75rem; flex: 1 1 12rem; min-width: 0;
+}
+.field-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.field-error { margin: 0.35rem 0 0; font-weight: 600; }
+.field-error:empty { display: none; }
+.field-error { border-left: 4px solid var(--graphite); padding-left: 0.5rem; }
+input[aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
+.inline-form { margin-bottom: 0.75rem; }
+.course-list { list-style: none; margin: 0; padding: 0; }
+.course-item {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; justify-content: space-between;
+  border: 2px solid var(--grey); border-radius: 6px; padding: 0.5rem 0.75rem; margin-top: 0.5rem;
+}
+.course-edit { width: 100%; margin: 0; }
+.course-info { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.course-name { font-weight: 600; }
+.course-count { color: var(--grey); font-size: 0.95rem; }
+.course-actions { display: flex; gap: 0.5rem; }

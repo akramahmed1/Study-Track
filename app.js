@@ -132,6 +132,54 @@
     return counts;
   }
 
+
+  /* ---- Courses ---- */
+  var COURSE_NAME_MAX = 60;
+
+  function newId(prefix) {
+    return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  /* Returns an error message string, or '' when the name is acceptable. */
+  function validateCourseName(data, name, ignoreId) {
+    var n = (name || '').trim();
+    if (!n) { return 'Enter a course name.'; }
+    if (n.length > COURSE_NAME_MAX) { return 'Course names can be at most ' + COURSE_NAME_MAX + ' characters.'; }
+    var lower = n.toLowerCase();
+    var dup = data.courses.some(function (c) { return c.id !== ignoreId && c.name.trim().toLowerCase() === lower; });
+    return dup ? 'A course with this name already exists.' : '';
+  }
+
+  function addCourse(data, name) {
+    var error = validateCourseName(data, name);
+    if (error) { return { ok: false, error: error }; }
+    var course = { id: newId('c_'), name: name.trim() };
+    data.courses.push(course);
+    return { ok: true, course: course };
+  }
+
+  function renameCourse(data, id, name) {
+    var course = data.courses.filter(function (c) { return c.id === id; })[0];
+    if (!course) { return { ok: false, error: 'That course no longer exists.' }; }
+    var error = validateCourseName(data, name, id);
+    if (error) { return { ok: false, error: error }; }
+    course.name = name.trim();
+    return { ok: true, course: course };
+  }
+
+  function assignmentsInCourse(data, id) {
+    return data.assignments.filter(function (a) { return a.courseId === id; }).length;
+  }
+
+  /* Deleting a course that still has assignments is blocked. */
+  function deleteCourse(data, id) {
+    var count = assignmentsInCourse(data, id);
+    if (count > 0) { return { ok: false, reason: 'in-use', count: count }; }
+    var before = data.courses.length;
+    data.courses = data.courses.filter(function (c) { return c.id !== id; });
+    return data.courses.length < before ? { ok: true } : { ok: false, reason: 'missing' };
+  }
+
   var api = {
     SCHEMA_VERSION: SCHEMA_VERSION,
     DEFAULT_KEY: DEFAULT_KEY,
@@ -139,7 +187,12 @@
     isValidData: isValidData,
     createStore: createStore,
     statusOf: statusOf,
-    countByStatus: countByStatus
+    countByStatus: countByStatus,
+    validateCourseName: validateCourseName,
+    addCourse: addCourse,
+    renameCourse: renameCourse,
+    deleteCourse: deleteCourse,
+    assignmentsInCourse: assignmentsInCourse
   };
   global.StudyTrack = api;
 
@@ -202,6 +255,117 @@
     // The assignment list itself is built in increment 4.
   }
 
+
+  /* ---- Courses UI ---- */
+  function setFieldError(input, errorEl, message) {
+    errorEl.textContent = message ? 'Error: ' + message : '';
+    if (message) { input.setAttribute('aria-invalid', 'true'); } else { input.removeAttribute('aria-invalid'); }
+  }
+
+  function renderCourses(store, editingId, focusAfter) {
+    var data = store.getData();
+    var list = document.getElementById('course-list');
+    list.textContent = '';
+    document.getElementById('no-courses').hidden = data.courses.length > 0;
+
+    data.courses.forEach(function (course) {
+      var li = el('li', 'course-item');
+      var count = assignmentsInCourse(data, course.id);
+
+      if (course.id === editingId) {
+        var form = el('form', 'inline-form course-edit');
+        form.noValidate = true;
+        var inputId = 'rename-' + course.id;
+        var label = el('label', '', 'Course name');
+        label.setAttribute('for', inputId);
+        var row = el('div', 'field-row');
+        var input = el('input');
+        input.id = inputId; input.type = 'text'; input.maxLength = COURSE_NAME_MAX; input.value = course.name;
+        input.autocomplete = 'off';
+        var errId = 'rename-error-' + course.id;
+        input.setAttribute('aria-describedby', errId);
+        var save = el('button', 'btn btn-strong', 'Save');
+        save.type = 'submit';
+        var cancel = el('button', 'btn', 'Cancel');
+        cancel.type = 'button';
+        row.appendChild(input); row.appendChild(save); row.appendChild(cancel);
+        var err = el('p', 'field-error'); err.id = errId; err.setAttribute('role', 'alert');
+        form.appendChild(label); form.appendChild(row); form.appendChild(err);
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var result = renameCourse(data, course.id, input.value);
+          if (!result.ok) { setFieldError(input, err, result.error); input.focus(); return; }
+          store.save();
+          renderCourses(store, null, { rename: course.id });
+        });
+        cancel.addEventListener('click', function () { renderCourses(store, null, { rename: course.id }); });
+        li.appendChild(form);
+        list.appendChild(li);
+        input.focus(); input.select();
+        return;
+      }
+
+      var info = el('div', 'course-info');
+      info.appendChild(el('span', 'course-name', course.name));
+      info.appendChild(el('span', 'course-count', count + (count === 1 ? ' assignment' : ' assignments')));
+      var actions = el('div', 'course-actions');
+      var rename = el('button', 'btn', 'Rename');
+      rename.type = 'button';
+      rename.setAttribute('aria-label', 'Rename course ' + course.name);
+      rename.dataset.courseId = course.id;
+      rename.addEventListener('click', function () {
+        document.getElementById('course-message').textContent = '';
+        renderCourses(store, course.id);
+      });
+      var del = el('button', 'btn', 'Delete');
+      del.type = 'button';
+      del.setAttribute('aria-label', 'Delete course ' + course.name);
+      del.addEventListener('click', function () { onDeleteCourse(store, course); });
+      actions.appendChild(rename); actions.appendChild(del);
+      li.appendChild(info); li.appendChild(actions);
+      list.appendChild(li);
+    });
+
+    if (focusAfter && focusAfter.rename) {
+      var btn = list.querySelector('button[data-course-id="' + focusAfter.rename + '"]');
+      if (btn) { btn.focus(); }
+    }
+  }
+
+  function onDeleteCourse(store, course) {
+    var data = store.getData();
+    var message = document.getElementById('course-message');
+    var count = assignmentsInCourse(data, course.id);
+    if (count > 0) {
+      message.textContent = 'Error: "' + course.name + '" cannot be deleted because it still has ' + count +
+        (count === 1 ? ' assignment' : ' assignments') + '. Delete or move those assignments first.';
+      return;
+    }
+    message.textContent = '';
+    confirmDialog('Delete the course "' + course.name + '"? This cannot be undone.', 'Delete course').then(function (ok) {
+      if (!ok) { return; }
+      if (deleteCourse(data, course.id).ok) { store.save(); }
+      renderCourses(store);
+      document.getElementById('course-name').focus();
+    });
+  }
+
+  function initCourseForm(store) {
+    var form = document.getElementById('course-form');
+    var input = document.getElementById('course-name');
+    var err = document.getElementById('course-error');
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var result = addCourse(store.getData(), input.value);
+      if (!result.ok) { setFieldError(input, err, result.error); input.focus(); return; }
+      setFieldError(input, err, '');
+      store.save();
+      input.value = '';
+      renderCourses(store);
+      input.focus();
+    });
+  }
+
   function init() {
     var store = createStore({
       onSaveError: function (message) {
@@ -223,6 +387,7 @@
                 warn.remove();
                 renderGreeting(store.getData());
                 renderDashboard(store.getData());
+                renderCourses(store);
               } else {
                 showBanner('Changes could not be saved', 'The browser would not let StudyTrack clear its data.');
               }
@@ -236,6 +401,8 @@
 
     renderGreeting(store.getData());
     renderDashboard(store.getData());
+    renderCourses(store);
+    initCourseForm(store);
     global.StudyTrackApp = { store: store, confirmDialog: confirmDialog };
   }
 
