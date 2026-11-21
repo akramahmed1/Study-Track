@@ -90,7 +90,7 @@ Try these on your own computer and phone, then change the status here.
 
 | # | Manual check | How | Status |
 |---|---|---|---|
-| M1 | Run the automated checks on your laptop | In VS Code, right-click `tests/tests.html` and choose "Open with Live Server" (in Chrome). The top box should say "49 of 49 checks passed - ALL PASS". Write down your Chrome version (Chrome menu, Help, About Google Chrome). | Not yet tested |
+| M1 | Run the automated checks on your laptop | In VS Code, right-click `tests/tests.html` and choose "Open with Live Server" (in Chrome). The top box should say "49 of 49 checks passed - ALL PASS". Write down your Chrome version (Chrome menu, Help, About Google Chrome). | **Passed 2026-11-21**: "49 of 49 checks passed - ALL PASS" on Akram's Windows laptop in Chrome via Live Server (127.0.0.1:5500), seen in a screenshot. Chrome version not yet written down. |
 | M2 | Every core workflow by hand in Chrome | Add a course, add an assignment, edit it, complete it, reopen it, delete it, use the filters, and check the progress percentage. | Not yet tested |
 | M3 | Every core workflow by hand in Edge | Optional: you decided to use Chrome only, so Edge has not been tested. | Not yet tested |
 | M4 | A reminder appearing while the app is open | Create an assignment with a reminder 2 to 3 minutes ahead and keep the tab visible. A banner should appear within about 30 seconds of that time. | Not yet tested |
