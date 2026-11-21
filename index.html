@@ -13,6 +13,7 @@
     <div class="header-inner">
       <p class="brand">StudyTrack</p>
       <p class="greeting" id="greeting">Hi there</p>
+      <button type="button" class="btn" id="open-settings">Settings</button>
     </div>
   </header>
 
@@ -135,6 +136,42 @@
           <button type="button" class="btn" id="details-complete">Mark complete</button>
           <button type="button" class="btn" id="details-delete">Delete</button>
           <button type="button" class="btn" id="details-back">Back to dashboard</button>
+        </div>
+      </div>
+
+      <div id="view-settings" hidden>
+        <h1 class="page-title" id="settings-title" tabindex="-1">Settings</h1>
+        <p id="settings-msg" class="saved-msg" role="status"></p>
+
+        <section aria-labelledby="name-heading">
+          <h2 id="name-heading" class="section-label">Name label</h2>
+          <form id="name-form" novalidate>
+            <div class="field">
+              <label for="s-name">Your name (optional)</label>
+              <input id="s-name" type="text" maxlength="30" autocomplete="off" aria-describedby="help-name err-name">
+              <p id="help-name" class="help">Shown in the header as "Hi, name". It is only a label, not an account.</p>
+              <p id="err-name" class="field-error" role="alert"></p>
+            </div>
+            <button type="submit" class="btn btn-strong">Save name</button>
+          </form>
+        </section>
+
+        <section aria-labelledby="storage-heading">
+          <h2 id="storage-heading" class="section-label">Where your records are kept</h2>
+          <p class="storage-note">Your records are stored only in this browser on this device. They are lost if you clear your browser data or switch to a different device or browser.</p>
+          <p class="help">Reminders only appear while StudyTrack is open. Always rely on your official course deadlines.</p>
+        </section>
+
+        <section aria-labelledby="data-heading">
+          <h2 id="data-heading" class="section-label">Sample and clean-up</h2>
+          <div class="actions actions-left">
+            <button type="button" class="btn" id="load-samples">Load sample assignments</button>
+            <button type="button" class="btn" id="clear-all">Clear all StudyTrack data</button>
+          </div>
+        </section>
+
+        <div class="actions actions-left">
+          <button type="button" class="btn btn-strong" id="settings-back">Back to dashboard</button>
         </div>
       </div>
     </main>

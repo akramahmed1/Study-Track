@@ -178,3 +178,7 @@ input[aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
 /* Reminder banners */
 #reminder-area:empty { display: none; }
 .reminder-banner { border-style: double; border-width: 6px; }
+
+/* Settings */
+.storage-note { border: 2px solid var(--grey); border-radius: 6px; padding: 0.75rem 1rem; margin: 0 0 0.5rem; }
+.header-inner .btn { min-height: 2.5rem; padding: 0.25rem 0.9rem; }

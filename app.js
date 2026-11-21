@@ -40,6 +40,7 @@
     var key = options.key || global.STUDYTRACK_KEY || DEFAULT_KEY;
     var data = defaultData();
     var halted = false;
+    var haltReason = null; // 'corrupt' | 'unavailable' | 'save-failed'
     var loadState = 'ok';
 
     function getStorage() {
@@ -53,12 +54,14 @@
       } catch (e) {
         data = defaultData();
         halted = true;
+        haltReason = 'unavailable';
         loadState = 'unavailable';
         return { ok: false, reason: 'unavailable' };
       }
       if (raw === null || raw === undefined) {
         data = defaultData();
         halted = false;
+        haltReason = null;
         loadState = 'ok';
         return { ok: true, fresh: true };
       }
@@ -71,11 +74,13 @@
       if (!isValidData(parsed)) {
         data = defaultData();
         halted = true; // do not overwrite the unreadable data until the user chooses to clear it
+        haltReason = 'corrupt';
         loadState = 'corrupt';
         return { ok: false, reason: 'corrupt' };
       }
       data = parsed;
       halted = false;
+      haltReason = null;
       loadState = 'ok';
       return { ok: true, fresh: false };
     }
@@ -87,6 +92,7 @@
         return { ok: true };
       } catch (e) {
         halted = true;
+        haltReason = 'save-failed';
         if (typeof options.onSaveError === 'function') {
           options.onSaveError('Changes could not be saved');
         }
@@ -101,8 +107,7 @@
         return { ok: false };
       }
       data = defaultData();
-      halted = false;
-      loadState = 'ok';
+      if (haltReason === 'corrupt') { halted = false; haltReason = null; loadState = 'ok'; }
       return { ok: true };
     }
 
@@ -356,6 +361,66 @@
     };
   }
 
+  /* ---- Settings: display name, sample data ---- */
+  var NAME_MAX = 30;
+
+  function validateDisplayName(name) {
+    var n = (name || '').trim();
+    return n.length > NAME_MAX ? 'The name can be at most ' + NAME_MAX + ' characters.' : '';
+  }
+
+  function setDisplayName(data, name) {
+    var error = validateDisplayName(name);
+    if (error) { return { ok: false, error: error }; }
+    data.settings.displayName = (name || '').trim();
+    return { ok: true };
+  }
+
+  /* Adds sample courses and assignments (for the student pilot) with dates relative to "now".
+   * Items that already exist (same course name / same title in the same course) are skipped,
+   * so pressing the button twice does not create duplicates. */
+  var SAMPLE_COURSES = ['Biology 101', 'English Composition', 'Calculus I'];
+  var SAMPLE_ASSIGNMENTS = [
+    { course: 'Biology 101', title: 'Lab report: cell structure', dueH: 48, reminderH: 24, notes: 'Include the diagram from lab 2.', done: false },
+    { course: 'Biology 101', title: 'Read chapter 5', dueH: -30, reminderH: null, notes: '', done: false },
+    { course: 'Biology 101', title: 'Quiz 1', dueH: -100, reminderH: null, notes: '', done: true },
+    { course: 'English Composition', title: 'Essay draft', dueH: 72, reminderH: 60, notes: 'Five paragraphs, MLA format.', done: false },
+    { course: 'English Composition', title: 'Peer review', dueH: 150, reminderH: null, notes: '', done: false },
+    { course: 'Calculus I', title: 'Problem set 3', dueH: 20, reminderH: 18, notes: 'Odd-numbered problems.', done: false },
+    { course: 'Calculus I', title: 'Midterm study guide', dueH: 200, reminderH: null, notes: '', done: false },
+    { course: 'Calculus I', title: 'Problem set 2', dueH: -60, reminderH: null, notes: '', done: true }
+  ];
+
+  function loadSampleData(data, now) {
+    var base = (now === undefined ? new Date() : new Date(now)).getTime();
+    var HOUR = 3600000;
+    var addedCourses = 0, addedAssignments = 0;
+    SAMPLE_COURSES.forEach(function (name) {
+      if (!data.courses.some(function (c) { return c.name.toLowerCase() === name.toLowerCase(); })) {
+        data.courses.push({ id: newId('c_'), name: name });
+        addedCourses += 1;
+      }
+    });
+    SAMPLE_ASSIGNMENTS.forEach(function (sample) {
+      var course = data.courses.filter(function (c) { return c.name.toLowerCase() === sample.course.toLowerCase(); })[0];
+      if (!course) { return; }
+      var exists = data.assignments.some(function (a) { return a.courseId === course.id && a.title === sample.title; });
+      if (exists) { return; }
+      var result = createAssignment(data, {
+        title: sample.title,
+        courseId: course.id,
+        dueAt: new Date(base + sample.dueH * HOUR).toISOString(),
+        reminderAt: sample.reminderH === null ? '' : new Date(base + sample.reminderH * HOUR).toISOString(),
+        notes: sample.notes
+      }, base);
+      if (result.ok) {
+        if (sample.done) { completeAssignment(data, result.assignment.id, base); }
+        addedAssignments += 1;
+      }
+    });
+    return { addedCourses: addedCourses, addedAssignments: addedAssignments };
+  }
+
   var api = {
     SCHEMA_VERSION: SCHEMA_VERSION,
     DEFAULT_KEY: DEFAULT_KEY,
@@ -379,7 +444,10 @@
     deleteAssignment: deleteAssignment,
     filterAssignments: filterAssignments,
     courseProgress: courseProgress,
-    createReminderEngine: createReminderEngine
+    createReminderEngine: createReminderEngine,
+    validateDisplayName: validateDisplayName,
+    setDisplayName: setDisplayName,
+    loadSampleData: loadSampleData
   };
   global.StudyTrack = api;
 
@@ -587,12 +655,12 @@
   var ui = { view: 'dashboard', editingId: null, detailsId: null, filter: { status: 'all', courseId: '' } };
 
   function showView(name) {
-    ['dashboard', 'form', 'details'].forEach(function (v) {
+    ['dashboard', 'form', 'details', 'settings'].forEach(function (v) {
       document.getElementById('view-' + v).hidden = (v !== name);
     });
     ui.view = name;
     window.scrollTo(0, 0);
-    var heading = { dashboard: 'dashboard-title', form: 'form-title', details: 'details-title' }[name];
+    var heading = { dashboard: 'dashboard-title', form: 'form-title', details: 'details-title', settings: 'settings-title' }[name];
     document.getElementById(heading).focus();
   }
 
@@ -859,6 +927,63 @@
     return tick;
   }
 
+  /* ---- Settings UI ---- */
+  function showSettingsMessage(text) { document.getElementById('settings-msg').textContent = text; }
+
+  function resetAfterDataChange(store) {
+    Object.keys(reminderBanners).forEach(removeReminderBanner);
+    ui.filter = { status: 'all', courseId: '' };
+    renderGreeting(store.getData());
+    refreshDashboard(store);
+  }
+
+  function initSettings(store) {
+    var nameInput = document.getElementById('s-name');
+    var nameErr = document.getElementById('err-name');
+
+    document.getElementById('open-settings').addEventListener('click', function () {
+      nameInput.value = store.getData().settings.displayName || '';
+      setFieldError(nameInput, nameErr, '');
+      showSettingsMessage('');
+      showView('settings');
+    });
+    document.getElementById('settings-back').addEventListener('click', function () { showView('dashboard'); });
+
+    document.getElementById('name-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var result = setDisplayName(store.getData(), nameInput.value);
+      if (!result.ok) { setFieldError(nameInput, nameErr, result.error); nameInput.focus(); return; }
+      setFieldError(nameInput, nameErr, '');
+      store.save();
+      renderGreeting(store.getData());
+      showSettingsMessage(store.getData().settings.displayName ? 'Name saved.' : 'Name removed.');
+    });
+
+    document.getElementById('load-samples').addEventListener('click', function () {
+      var r = loadSampleData(store.getData());
+      if (r.addedAssignments === 0 && r.addedCourses === 0) {
+        showSettingsMessage('The sample assignments are already loaded.');
+        return;
+      }
+      store.save();
+      refreshDashboard(store);
+      showSettingsMessage('Added ' + r.addedCourses + ' sample courses and ' + r.addedAssignments + ' sample assignments.');
+    });
+
+    document.getElementById('clear-all').addEventListener('click', function () {
+      confirmDialog('This permanently deletes every course and assignment stored in this browser, and your name label. This cannot be undone.', 'Clear all data').then(function (ok) {
+        if (!ok) { return; }
+        if (!store.clearAll().ok) {
+          showSettingsMessage('Error: the browser would not let StudyTrack clear its data.');
+          return;
+        }
+        resetAfterDataChange(store);
+        nameInput.value = '';
+        showSettingsMessage('All StudyTrack data has been cleared.');
+      });
+    });
+  }
+
   function init() {
     var store = createStore({
       onSaveError: function (message) {
@@ -897,6 +1022,7 @@
     renderCourses(store);
     initCourseForm(store);
     initAssignmentUi(store);
+    initSettings(store);
     var tick = startReminders(store);
     global.StudyTrackApp = { store: store, confirmDialog: confirmDialog, checkReminders: tick };
   }
