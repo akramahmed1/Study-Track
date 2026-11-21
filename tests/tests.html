@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StudyTrack checks</title>
+  <style>
+    body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 17px; line-height: 1.5; color: #1F1F1F; background: #FFFFFF; margin: 0; padding: 1rem; }
+    main { max-width: 64rem; margin: 0 auto; }
+    h1 { font-family: "Segoe Print", "Comic Sans MS", cursive; margin: 0 0 0.5rem; }
+    .note { color: #5E5E5E; }
+    #summary { font-weight: 700; border: 3px solid #1F1F1F; border-radius: 6px; padding: 0.75rem 1rem; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { border: 2px solid #5E5E5E; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+    td.result { font-weight: 700; white-space: nowrap; }
+    tr.fail td { border-width: 3px; border-color: #1F1F1F; }
+    td.detail { color: #5E5E5E; overflow-wrap: anywhere; }
+    #frames { position: absolute; left: -9999px; top: 0; width: 420px; height: 700px; }
+    #frames iframe { width: 420px; height: 700px; border: 0; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>StudyTrack checks</h1>
+  <p class="note">These checks load <code>../app.js</code> and run in this browser. Logic checks use the storage key
+    <code>studytrack.test.v1</code>; screen checks open the real page in a hidden frame with the key
+    <code>studytrack.test.ui</code>. Your real records (key <code>studytrack.v1</code>) are never read or changed.</p>
+  <p id="summary" role="status">Running checks...</p>
+  <table>
+    <thead><tr><th>#</th><th>Check</th><th>Result</th><th>Details</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table>
+  <div id="frames" aria-hidden="true"></div>
+</main>
+
+<script>window.STUDYTRACK_KEY = 'studytrack.test.v1';</script>
+<script src="../app.js"></script>
+<script>
+(function () {
+  'use strict';
+  var S = window.StudyTrack;
+  var LOGIC_KEY = 'studytrack.test.v1';
+  var UI_KEY = 'studytrack.test.ui';
+  var NOW = Date.parse('2026-06-15T12:00:00Z');
+  var HOUR = 3600000;
+  var INJECT = '<img src=x onerror=alert(1)>';
+
+  /* ---------- tiny test runner ---------- */
+  var tests = [];
+  function test(name, fn) { tests.push({ name: name, fn: fn }); }
+  function assert(cond, msg) { if (!cond) { throw new Error(msg || 'check failed'); } }
+  function eq(actual, expected, msg) {
+    var a = JSON.stringify(actual), e = JSON.stringify(expected);
+    if (a !== e) { throw new Error((msg || 'values differ') + ' (got ' + a + ', expected ' + e + ')'); }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function waitFor(fn, what) {
+    return new Promise(function (resolve, reject) {
+      var start = Date.now();
+      (function poll() {
+        var v; try { v = fn(); } catch (e) { v = false; }
+        if (v) { resolve(v); } else if (Date.now() - start > 4000) { reject(new Error('timed out waiting for ' + what)); } else { setTimeout(poll, 25); }
+      })();
+    });
+  }
+
+  /* ---------- helpers ---------- */
+  function iso(hours) { return new Date(NOW + hours * HOUR).toISOString(); }
+  function memStorage() {
+    var m = {};
+    return {
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+      setItem: function (k, v) { m[k] = String(v); },
+      removeItem: function (k) { delete m[k]; },
+      raw: m
+    };
+  }
+  function freshData() {
+    var d = S.defaultData();
+    S.addCourse(d, 'Math');
+    S.addCourse(d, 'Art');
+    return d;
+  }
+  function courseId(d, name) { return d.courses.filter(function (c) { return c.name === name; })[0].id; }
+  function add(d, title, course, dueH, remH) {
+    var r = S.createAssignment(d, {
+      title: title, courseId: courseId(d, course), dueAt: iso(dueH),
+      reminderAt: remH === null || remH === undefined ? '' : iso(remH), notes: ''
+    }, NOW);
+    if (!r.ok) { throw new Error('setup failed: ' + JSON.stringify(r.errors)); }
+    return r.assignment;
+  }
+  function titles(list) { return list.map(function (a) { return a.title; }); }
+  function engineFor(d, startH) { return S.createReminderEngine(function () { return d; }, NOW + startH * HOUR); }
+
+  /* ---------- A. Assignments: create, edit, complete, reopen, delete ---------- */
+  test('Create an assignment saves all fields with defaults', function () {
+    var d = freshData();
+    var r = S.createAssignment(d, { title: '  Essay  ', courseId: courseId(d, 'Math'), dueAt: iso(24), reminderAt: iso(12), notes: ' draft ' }, NOW);
+    assert(r.ok, 'should be ok');
+    var a = r.assignment;
+    eq(a.title, 'Essay'); eq(a.notes, 'draft'); eq(a.completed, false); eq(a.completedAt, null);
+    eq(a.dueAt, iso(24)); eq(a.reminderAt, iso(12)); eq(a.createdAt, iso(0)); eq(d.assignments.length, 1);
+  });
+  test('Edit an assignment changes its fields and updated time', function () {
+    var d = freshData(); var a = add(d, 'Essay', 'Math', 24, 12);
+    var later = NOW + 5 * HOUR;
+    var r = S.updateAssignment(d, a.id, { title: 'Essay v2', courseId: courseId(d, 'Art'), dueAt: iso(48), reminderAt: '', notes: 'x' }, later);
+    assert(r.ok, 'update should succeed');
+    var b = S.getAssignment(d, a.id);
+    eq(b.title, 'Essay v2'); eq(b.courseId, courseId(d, 'Art')); eq(b.dueAt, iso(48)); eq(b.reminderAt, null);
+    eq(b.updatedAt, new Date(later).toISOString()); eq(b.createdAt, iso(0));
+  });
+  test('Complete an assignment sets completed and completion time', function () {
+    var d = freshData(); var a = add(d, 'Essay', 'Math', 24);
+    assert(S.completeAssignment(d, a.id, NOW + HOUR).ok);
+    eq(a.completed, true); eq(a.completedAt, iso(1));
+  });
+  test('Reopen an assignment clears completed and completion time', function () {
+    var d = freshData(); var a = add(d, 'Essay', 'Math', 24);
+    S.completeAssignment(d, a.id, NOW); S.reopenAssignment(d, a.id, NOW + HOUR);
+    eq(a.completed, false); eq(a.completedAt, null);
+  });
+  test('Delete an assignment removes only that assignment', function () {
+    var d = freshData(); var a = add(d, 'A', 'Math', 24); add(d, 'B', 'Math', 48);
+    assert(S.deleteAssignment(d, a.id).ok);
+    eq(titles(d.assignments), ['B']);
+    assert(!S.deleteAssignment(d, 'nope').ok, 'deleting a missing id should report not ok');
+  });
+
+  /* ---------- B. Persistence ---------- */
+  test('Records persist after a reload (saved, re-read from real localStorage, compared)', function () {
+    localStorage.removeItem(LOGIC_KEY);
+    var s1 = S.createStore({ key: LOGIC_KEY }); s1.load();
+    var d = s1.getData();
+    S.addCourse(d, 'Math'); add(d, 'Essay', 'Math', 24, 12); S.setDisplayName(d, 'Alex');
+    assert(s1.save().ok, 'save should work');
+    var s2 = S.createStore({ key: LOGIC_KEY }); var res = s2.load();
+    assert(res.ok && !res.fresh, 'second store should find saved data');
+    eq(s2.getData(), s1.getData(), 'reloaded data should match what was saved');
+    localStorage.removeItem(LOGIC_KEY);
+  });
+  test('Everything is stored under one key with a schema version', function () {
+    var mem = memStorage(); var s = S.createStore({ key: 'k1', storage: mem }); s.load();
+    S.addCourse(s.getData(), 'Math'); s.save();
+    eq(Object.keys(mem.raw), ['k1']);
+    eq(JSON.parse(mem.raw.k1).schemaVersion, 1);
+  });
+
+  /* ---------- C. Status, counts, sorting, filters, progress ---------- */
+  test('Status rules: Upcoming, Overdue, Completed', function () {
+    eq(S.statusOf({ completed: false, dueAt: iso(1) }, NOW), 'upcoming');
+    eq(S.statusOf({ completed: false, dueAt: iso(-1) }, NOW), 'overdue');
+    eq(S.statusOf({ completed: true, dueAt: iso(-1) }, NOW), 'completed', 'completed wins over overdue');
+    eq(S.statusOf({ completed: true, dueAt: iso(1) }, NOW), 'completed');
+  });
+  test('Status boundary: due exactly now is still Upcoming; one second later is Overdue', function () {
+    eq(S.statusOf({ completed: false, dueAt: iso(0) }, NOW), 'upcoming');
+    eq(S.statusOf({ completed: false, dueAt: iso(0) }, NOW + 1000), 'overdue');
+  });
+  test('Dashboard counts: Upcoming, Overdue, Completed', function () {
+    var d = freshData(); add(d, 'late', 'Math', -5); add(d, 'soon', 'Math', 2); add(d, 'later', 'Art', 30);
+    var done = add(d, 'done', 'Art', -50); S.completeAssignment(d, done.id, NOW);
+    eq(S.countByStatus(d.assignments, NOW), { upcoming: 2, overdue: 1, completed: 1 });
+  });
+  test('List is sorted by due date, soonest first (ties by title)', function () {
+    var d = freshData(); add(d, 'c', 'Math', 30); add(d, 'a', 'Math', -5); add(d, 'b', 'Math', 2); add(d, 'a2', 'Math', 2);
+    eq(titles(S.sortByDue(d.assignments)), ['a', 'a2', 'b', 'c']);
+  });
+  test('Filters: All, Upcoming, Overdue, Completed', function () {
+    var d = freshData(); add(d, 'late', 'Math', -5); add(d, 'soon', 'Math', 2);
+    var done = add(d, 'done', 'Art', -50); S.completeAssignment(d, done.id, NOW);
+    eq(titles(S.filterAssignments(d, { status: 'all' }, NOW)), ['done', 'late', 'soon']);
+    eq(titles(S.filterAssignments(d, { status: 'upcoming' }, NOW)), ['soon']);
+    eq(titles(S.filterAssignments(d, { status: 'overdue' }, NOW)), ['late']);
+    eq(titles(S.filterAssignments(d, { status: 'completed' }, NOW)), ['done']);
+  });
+  test('Filter by course, and course combined with status', function () {
+    var d = freshData(); add(d, 'm-late', 'Math', -5); add(d, 'm-soon', 'Math', 2); add(d, 'a-soon', 'Art', 3);
+    eq(titles(S.filterAssignments(d, { status: 'all', courseId: courseId(d, 'Math') }, NOW)), ['m-late', 'm-soon']);
+    eq(titles(S.filterAssignments(d, { status: 'upcoming', courseId: courseId(d, 'Art') }, NOW)), ['a-soon']);
+    eq(titles(S.filterAssignments(d, { status: 'overdue', courseId: courseId(d, 'Art') }, NOW)), []);
+  });
+  test('Course progress is calculated from saved records (0%, 33%, 100%, empty course)', function () {
+    var d = freshData(); var a = add(d, 'a', 'Math', 1); var b = add(d, 'b', 'Math', 2); add(d, 'c', 'Math', 3);
+    var math = courseId(d, 'Math'), art = courseId(d, 'Art');
+    eq(S.courseProgress(d, math), { total: 3, completed: 0, percent: 0 });
+    S.completeAssignment(d, a.id, NOW);
+    eq(S.courseProgress(d, math), { total: 3, completed: 1, percent: 33 });
+    S.completeAssignment(d, b.id, NOW); S.completeAssignment(d, S.filterAssignments(d, { courseId: math }, NOW)[2].id, NOW);
+    eq(S.courseProgress(d, math), { total: 3, completed: 3, percent: 100 });
+    eq(S.courseProgress(d, art), { total: 0, completed: 0, percent: 0 });
+    S.reopenAssignment(d, a.id, NOW);
+    eq(S.courseProgress(d, math).percent, 67, 'progress follows reopen');
+  });
+
+  /* ---------- D. Courses ---------- */
+  test('Add course: trims, rejects empty and duplicate names (any capitalization)', function () {
+    var d = S.defaultData();
+    assert(S.addCourse(d, '  Biology ').ok); eq(d.courses[0].name, 'Biology');
+    assert(!S.addCourse(d, '   ').ok, 'empty'); assert(!S.addCourse(d, 'biology').ok, 'duplicate');
+    assert(!S.addCourse(d, new Array(62).join('x')).ok, 'too long');
+    eq(d.courses.length, 1);
+  });
+  test('Rename course works, but not to an existing name', function () {
+    var d = freshData(); var math = courseId(d, 'Math');
+    assert(S.renameCourse(d, math, 'Calculus').ok); eq(courseIdName(d, math), 'Calculus');
+    assert(!S.renameCourse(d, math, 'art').ok, 'duplicate of Art');
+    assert(S.renameCourse(d, math, 'CALCULUS').ok, 'changing capitalization of itself is fine');
+  });
+  function courseIdName(d, id) { return d.courses.filter(function (c) { return c.id === id; })[0].name; }
+  test('Delete course is blocked while it has assignments; allowed once empty', function () {
+    var d = freshData(); var a = add(d, 'x', 'Math', 5); var math = courseId(d, 'Math');
+    var r = S.deleteCourse(d, math);
+    assert(!r.ok && r.reason === 'in-use' && r.count === 1, 'should be blocked');
+    eq(d.courses.length, 2);
+    S.deleteAssignment(d, a.id);
+    assert(S.deleteCourse(d, math).ok, 'now allowed'); eq(d.courses.length, 1);
+  });
+
+  /* ---------- E. Reminders ---------- */
+  test('A reminder set after the due date is rejected with a message', function () {
+    var d = freshData(); var n = d.assignments.length;
+    var r = S.createAssignment(d, { title: 'x', courseId: courseId(d, 'Math'), dueAt: iso(10), reminderAt: iso(11), notes: '' }, NOW);
+    assert(!r.ok && /at or before the due date/.test(r.errors.reminderAt), 'message expected');
+    eq(d.assignments.length, n, 'nothing saved');
+  });
+  test('A reminder exactly at the due time is accepted', function () {
+    var d = freshData();
+    assert(S.createAssignment(d, { title: 'x', courseId: courseId(d, 'Math'), dueAt: iso(10), reminderAt: iso(10), notes: '' }, NOW).ok);
+  });
+  test('A reminder triggers when its time is reached, and only once', function () {
+    var d = freshData(); add(d, 'Essay', 'Math', 48, 1); var eng = engineFor(d, 0);
+    eq(titles(eng.check(NOW + 0.5 * HOUR)), [], 'not yet');
+    eq(titles(eng.check(NOW + 1.5 * HOUR)), ['Essay'], 'now due');
+    eq(titles(eng.check(NOW + 3 * HOUR)), [], 'never again');
+  });
+  test('Editing an assignment updates its reminder (old time no longer fires, new time does)', function () {
+    var d = freshData(); var a = add(d, 'Essay', 'Math', 48, 1); var eng = engineFor(d, 0);
+    S.updateAssignment(d, a.id, { title: 'Essay', courseId: a.courseId, dueAt: iso(48), reminderAt: iso(5), notes: '' }, NOW);
+    eq(titles(eng.check(NOW + 2 * HOUR)), [], 'old time passes silently');
+    eq(titles(eng.check(NOW + 6 * HOUR)), ['Essay'], 'new time fires');
+  });
+  test('Removing the reminder by editing cancels it', function () {
+    var d = freshData(); var a = add(d, 'Essay', 'Math', 48, 1); var eng = engineFor(d, 0);
+    S.updateAssignment(d, a.id, { title: 'Essay', courseId: a.courseId, dueAt: iso(48), reminderAt: '', notes: '' }, NOW);
+    eq(titles(eng.check(NOW + 3 * HOUR)), []);
+  });
+  test('Completing an assignment cancels its reminder; reopening before the time brings it back', function () {
+    var d = freshData(); var a = add(d, 'Essay', 'Math', 48, 5); var eng = engineFor(d, 0);
+    S.completeAssignment(d, a.id, NOW);
+    eq(titles(eng.check(NOW + 2 * HOUR)), []);
+    S.reopenAssignment(d, a.id, NOW + 2 * HOUR);
+    eq(titles(eng.check(NOW + 6 * HOUR)), ['Essay'], 'reopened reminder fires at its time');
+    S.completeAssignment(d, a.id, NOW + 6 * HOUR);
+    eq(titles(eng.check(NOW + 9 * HOUR)), []);
+  });
+  test('Deleting an assignment cancels its reminder', function () {
+    var d = freshData(); var a = add(d, 'Essay', 'Math', 48, 5); var eng = engineFor(d, 0);
+    S.deleteAssignment(d, a.id);
+    eq(titles(eng.check(NOW + 6 * HOUR)), []);
+  });
+  test('A reminder time that passed while the app was closed does not fire', function () {
+    var d = freshData(); add(d, 'Old', 'Math', 48, -3); var eng = engineFor(d, 0);
+    eq(titles(eng.check(NOW + HOUR)), []);
+  });
+
+  /* ---------- F. Validation ---------- */
+  function validInput(d) { return { title: 'T', courseId: courseId(d, 'Math'), dueAt: iso(5), reminderAt: '', notes: '' }; }
+  test('Invalid form data is rejected: missing or blank title', function () {
+    var d = freshData(); var i = validInput(d); i.title = '   ';
+    var v = S.validateAssignment(d, i); assert(!v.ok && v.errors.title, 'title error');
+    i.title = new Array(122).join('x'); assert(S.validateAssignment(d, i).errors.title, 'too long');
+  });
+  test('Invalid form data is rejected: missing or unknown course', function () {
+    var d = freshData(); var i = validInput(d); i.courseId = '';
+    assert(S.validateAssignment(d, i).errors.courseId, 'missing course');
+    i.courseId = 'c_gone'; assert(S.validateAssignment(d, i).errors.courseId, 'unknown course');
+  });
+  test('Invalid form data is rejected: missing or invalid due date, invalid reminder', function () {
+    var d = freshData(); var i = validInput(d); i.dueAt = '';
+    assert(S.validateAssignment(d, i).errors.dueAt, 'missing due');
+    i.dueAt = 'not a date'; assert(S.validateAssignment(d, i).errors.dueAt, 'bad due');
+    i = validInput(d); i.reminderAt = 'garbage'; assert(S.validateAssignment(d, i).errors.reminderAt, 'bad reminder');
+  });
+  test('Notes over the limit are rejected', function () {
+    var d = freshData(); var i = validInput(d); i.notes = new Array(1002).join('n');
+    assert(S.validateAssignment(d, i).errors.notes);
+  });
+  test('Nothing invalid is saved (create and edit leave data unchanged)', function () {
+    var d = freshData(); var a = add(d, 'Keep', 'Math', 5); var before = JSON.stringify(d);
+    assert(!S.createAssignment(d, { title: '', courseId: '', dueAt: '', reminderAt: '', notes: '' }, NOW).ok);
+    assert(!S.updateAssignment(d, a.id, { title: '', courseId: a.courseId, dueAt: iso(5), reminderAt: '', notes: '' }, NOW).ok);
+    eq(JSON.stringify(d), before, 'data must be identical');
+  });
+  test('Display name: trimmed and limited to 30 characters', function () {
+    var d = S.defaultData();
+    assert(S.setDisplayName(d, '  Alex ').ok); eq(d.settings.displayName, 'Alex');
+    assert(!S.setDisplayName(d, new Array(32).join('x')).ok); eq(d.settings.displayName, 'Alex');
+  });
+
+  /* ---------- G. Storage failures ---------- */
+  test('Simulated save failure triggers the warning "Changes could not be saved"', function () {
+    var messages = [];
+    var s = S.createStore({ key: 'k', storage: { getItem: function () { return null; }, removeItem: function () {}, setItem: function () { throw new Error('quota'); } }, onSaveError: function (m) { messages.push(m); } });
+    s.load(); var r = s.save();
+    assert(!r.ok); eq(messages, ['Changes could not be saved']);
+  });
+  test('After a save failure all further writes are halted (no more attempts)', function () {
+    var attempts = 0;
+    var s = S.createStore({ key: 'k', storage: { getItem: function () { return null; }, removeItem: function () {}, setItem: function () { attempts += 1; throw new Error('quota'); } }, onSaveError: function () {} });
+    s.load(); s.save(); s.save(); s.save();
+    eq(attempts, 1, 'only the first write is attempted'); assert(s.isHalted());
+  });
+  test('Unreadable stored data does not crash; writes halt; raw data is left untouched', function () {
+    var mem = memStorage(); mem.setItem('k', '{not json');
+    var s = S.createStore({ key: 'k', storage: mem }); var r = s.load();
+    eq(r.reason, 'corrupt'); assert(s.isHalted()); assert(!s.save().ok);
+    eq(mem.raw.k, '{not json', 'raw data must not be overwritten'); eq(s.getData().assignments, []);
+  });
+  test('Stored data with the wrong shape or schema version is treated as unreadable', function () {
+    ['{"schemaVersion":99,"settings":{},"courses":[],"assignments":[]}', '{"schemaVersion":1}', '[]', '"text"', 'null'].forEach(function (raw) {
+      var mem = memStorage(); mem.setItem('k', raw);
+      eq(S.createStore({ key: 'k', storage: mem }).load().reason, 'corrupt', raw);
+    });
+  });
+  test('Blocked or unavailable browser storage does not crash', function () {
+    var s = S.createStore({ key: 'k', storage: { getItem: function () { throw new Error('blocked'); }, setItem: function () { throw new Error('blocked'); }, removeItem: function () { throw new Error('blocked'); } } });
+    eq(s.load().reason, 'unavailable'); assert(s.isHalted()); assert(!s.save().ok);
+    assert(!s.clearAll().ok, 'clear cannot work either, and must not throw');
+  });
+  test('Clear-all lifts the halt for unreadable data but not after a save failure', function () {
+    var mem = memStorage(); mem.setItem('k', '{bad');
+    var s = S.createStore({ key: 'k', storage: mem }); s.load();
+    assert(s.clearAll().ok); assert(!s.isHalted()); assert(s.save().ok, 'writes work again after clearing bad data');
+    var fail = true, store = {};
+    var s2 = S.createStore({ key: 'k', storage: { getItem: function () { return null; }, removeItem: function () {}, setItem: function (k, v) { if (fail) { throw new Error('q'); } store[k] = v; } }, onSaveError: function () {} });
+    s2.load(); s2.save(); s2.clearAll(); fail = false;
+    assert(s2.isHalted() && !s2.save().ok, 'still halted after a save failure');
+  });
+
+  /* ---------- H. Sample data ---------- */
+  test('Sample data loads courses and assignments, and does not duplicate on a second load', function () {
+    var d = S.defaultData();
+    var r1 = S.loadSampleData(d, NOW); eq([r1.addedCourses, r1.addedAssignments], [3, 8]);
+    var c = S.countByStatus(d.assignments, NOW);
+    assert(c.upcoming > 0 && c.overdue > 0 && c.completed > 0, 'sample data mixes all three statuses');
+    var r2 = S.loadSampleData(d, NOW); eq([r2.addedCourses, r2.addedAssignments], [0, 0]);
+    eq(d.assignments.length, 8);
+  });
+
+  /* ---------- I. Script injection ---------- */
+  test('Text like <img src=x onerror=alert(1)> is stored exactly as typed (as plain text data)', function () {
+    var d = freshData();
+    var r = S.createAssignment(d, { title: INJECT, courseId: courseId(d, 'Math'), dueAt: iso(5), reminderAt: '', notes: INJECT }, NOW);
+    assert(r.ok); eq(r.assignment.title, INJECT); eq(r.assignment.notes, INJECT);
+    var round = JSON.parse(JSON.stringify(d)); eq(round.assignments[0].title, INJECT);
+  });
+
+  /* ---------- J. Real page checks (the real index.html in a hidden frame, separate storage key) ---------- */
+  function openApp(seedData) {
+    localStorage.removeItem(UI_KEY);
+    if (seedData !== undefined) { localStorage.setItem(UI_KEY, typeof seedData === 'string' ? seedData : JSON.stringify(seedData)); }
+    return new Promise(function (resolve, reject) {
+      var f = document.createElement('iframe');
+      f.name = 'studytrack-test-key:' + UI_KEY;
+      f.addEventListener('load', function () { resolve(f); });
+      f.addEventListener('error', function () { reject(new Error('could not load ../index.html')); });
+      f.src = '../index.html';
+      document.getElementById('frames').appendChild(f);
+    });
+  }
+  function closeApp(f) { f.remove(); localStorage.removeItem(UI_KEY); }
+  function inFrame(fn, seedFn) {
+    return function () {
+      var frame;
+      return openApp(seedFn ? seedFn() : undefined).then(function (f) { frame = f; return fn(f.contentWindow, f.contentDocument); })
+        .then(function () { closeApp(frame); }, function (e) { if (frame) { closeApp(frame); } throw e; });
+    };
+  }
+  function submit(doc, formId) { doc.getElementById(formId).requestSubmit(); }
+  function setVal(doc, id, v) { doc.getElementById(id).value = v; }
+
+  test('Page: the real app used the test storage key, not the real one', inFrame(function (w) {
+    eq(w.StudyTrackApp.store.key, UI_KEY);
+  }));
+
+  test('Page: <img src=x onerror=alert(1)> displays as plain text in the list, details and course list', inFrame(function (w, doc) {
+    var alerted = false; w.alert = function () { alerted = true; };
+    var rows = doc.querySelectorAll('#assignment-list .assignment-title');
+    eq(rows.length, 1, 'one assignment row');
+    eq(rows[0].textContent, INJECT, 'row shows the exact text');
+    eq(doc.querySelectorAll('#assignment-list img, #assignment-list script, #course-list img, #course-list script').length, 0, 'no element was created from the text');
+    doc.querySelector('.assignment-row').click();
+    eq(doc.getElementById('details-title').textContent, INJECT, 'details title is plain text');
+    assert(doc.getElementById('details-list').textContent.indexOf(INJECT) !== -1, 'notes are plain text');
+    eq(doc.querySelectorAll('#view-details img, #view-details script').length, 0, 'no element in details');
+    eq(doc.querySelector('.course-name').textContent, INJECT + ' course', 'course name is plain text');
+    return sleep(300).then(function () { assert(!alerted, 'alert must never run'); });
+  }, function () {
+    var d = S.defaultData(); S.addCourse(d, INJECT + ' course');
+    S.createAssignment(d, { title: INJECT, courseId: d.courses[0].id, dueAt: iso(5), reminderAt: '', notes: INJECT }, NOW);
+    return d;
+  }));
+
+  test('Page: create, complete, reopen and delete an assignment through the screens', inFrame(function (w, doc) {
+    setVal(doc, 'course-name', 'Biology'); submit(doc, 'course-form');
+    assert(doc.getElementById('course-list').textContent.indexOf('Biology') !== -1, 'course added');
+    doc.getElementById('new-assignment').click();
+    setVal(doc, 'f-title', 'Lab report');
+    var sel = doc.getElementById('f-course'); sel.value = sel.options[1].value;
+    setVal(doc, 'f-due', '2099-01-01T10:00'); submit(doc, 'assignment-form');
+    assert(!doc.getElementById('view-details').hidden, 'details view shown after saving');
+    eq(doc.getElementById('details-title').textContent, 'Lab report');
+    eq(doc.getElementById('details-complete').textContent, 'Mark complete');
+    doc.getElementById('details-complete').click();
+    eq(doc.getElementById('details-complete').textContent, 'Reopen');
+    assert(doc.getElementById('details-list').textContent.indexOf('Completed') !== -1, 'status says Completed');
+    doc.getElementById('details-complete').click();
+    eq(doc.getElementById('details-complete').textContent, 'Mark complete');
+    doc.getElementById('details-delete').click();
+    return waitFor(function () { return doc.getElementById('confirm-dialog').open; }, 'confirmation dialog').then(function () {
+      eq(w.StudyTrackApp.store.getData().assignments.length, 1, 'not deleted before confirming');
+      doc.getElementById('confirm-ok').click();
+      return waitFor(function () { return !doc.getElementById('view-dashboard').hidden; }, 'dashboard after delete');
+    }).then(function () {
+      eq(w.StudyTrackApp.store.getData().assignments.length, 0, 'deleted after confirming');
+      eq(doc.querySelectorAll('#assignment-list li').length, 0, 'list is empty');
+    });
+  }));
+
+  test('Page: an invalid form returns to the form with messages next to the fields and saves nothing', inFrame(function (w, doc) {
+    setVal(doc, 'course-name', 'Math'); submit(doc, 'course-form');
+    doc.getElementById('new-assignment').click(); submit(doc, 'assignment-form');
+    assert(!doc.getElementById('view-form').hidden, 'still on the form');
+    assert(/Enter a title/.test(doc.getElementById('err-title').textContent), 'title message');
+    assert(/Choose a course/.test(doc.getElementById('err-course').textContent), 'course message');
+    assert(/Enter a due date/.test(doc.getElementById('err-due').textContent), 'due message');
+    eq(doc.getElementById('f-title').getAttribute('aria-invalid'), 'true');
+    eq(w.StudyTrackApp.store.getData().assignments.length, 0, 'nothing saved');
+  }));
+
+  test('Page: a reminder after the due date is rejected on the form', inFrame(function (w, doc) {
+    setVal(doc, 'course-name', 'Math'); submit(doc, 'course-form');
+    doc.getElementById('new-assignment').click(); setVal(doc, 'f-title', 'X');
+    var sel = doc.getElementById('f-course'); sel.value = sel.options[1].value;
+    setVal(doc, 'f-due', '2099-01-01T10:00'); setVal(doc, 'f-reminder', '2099-01-01T11:00'); submit(doc, 'assignment-form');
+    assert(/at or before the due date/.test(doc.getElementById('err-reminder').textContent), 'reminder message');
+    eq(w.StudyTrackApp.store.getData().assignments.length, 0);
+  }));
+
+  test('Page: a reminder banner appears when its time is reached and can be dismissed', inFrame(function (w, doc) {
+    var d = w.StudyTrackApp.store.getData(); w.StudyTrack.addCourse(d, 'Math');
+    var now = Date.now();
+    w.StudyTrack.createAssignment(d, { title: 'Soon', courseId: d.courses[0].id, dueAt: new Date(now + 3600000).toISOString(), reminderAt: new Date(now + 60000).toISOString(), notes: '' }, now);
+    w.StudyTrackApp.checkReminders(now + 30000);
+    eq(doc.querySelectorAll('.reminder-banner').length, 0, 'not yet');
+    w.StudyTrackApp.checkReminders(now + 90000);
+    eq(doc.querySelectorAll('.reminder-banner').length, 1, 'banner shown');
+    assert(doc.querySelector('.reminder-banner').textContent.indexOf('Reminder: Soon') !== -1);
+    doc.querySelector('.reminder-banner .btn-strong').click();
+    eq(doc.querySelectorAll('.reminder-banner').length, 0, 'dismissed');
+  }));
+
+  test('Page: Overdue assignments show the text label "Overdue" (not colour alone)', inFrame(function (w, doc) {
+    eq(doc.querySelector('#assignment-list .status').textContent, 'Overdue');
+    assert(/Overdue/.test(doc.querySelector('.count-tile:nth-child(2)').textContent), 'count tile is labelled');
+    eq(doc.getElementById('count-overdue').textContent, '1');
+  }, function () {
+    var d = freshData(); add(d, 'Past', 'Math', -5);
+    d.assignments[0].dueAt = new Date(Date.now() - 5 * HOUR).toISOString(); // really in the past
+    return d;
+  }));
+
+  test('Page: a simulated storage failure shows the warning and halts further writes', inFrame(function (w, doc) {
+    var attempts = 0;
+    w.Storage.prototype.setItem = function () { attempts += 1; throw new Error('quota'); };
+    setVal(doc, 'course-name', 'One'); submit(doc, 'course-form');
+    assert(doc.getElementById('banner-area').textContent.indexOf('Changes could not be saved') !== -1, 'warning shown');
+    assert(w.StudyTrackApp.store.isHalted(), 'store halted');
+    setVal(doc, 'course-name', 'Two'); submit(doc, 'course-form');
+    eq(attempts, 1, 'no further write attempts after the failure');
+  }));
+
+  test('Page: unreadable stored data shows a message and offers to clear it, without crashing', inFrame(function (w, doc) {
+    assert(doc.getElementById('banner-area').textContent.indexOf('could not be read') !== -1, 'message shown');
+    assert(!doc.getElementById('view-dashboard').hidden, 'dashboard still works');
+    eq(localStorage.getItem(UI_KEY), '{broken', 'raw data left untouched');
+    var btn = doc.querySelector('#banner-area button'); assert(btn && /Clear/.test(btn.textContent), 'clear button offered');
+  }, function () { return '{broken'; }));
+
+  test('Page: Settings shows the storage note; name label updates the header; Clear all asks for confirmation', inFrame(function (w, doc) {
+    doc.getElementById('open-settings').click();
+    var note = doc.querySelector('.storage-note').textContent;
+    assert(/only in this browser on this device/.test(note) && /lost if you clear/.test(note), 'storage note');
+    setVal(doc, 's-name', 'Alex'); submit(doc, 'name-form');
+    eq(doc.getElementById('greeting').textContent, 'Hi, Alex');
+    doc.getElementById('load-samples').click();
+    eq(w.StudyTrackApp.store.getData().assignments.length, 8, 'samples loaded');
+    doc.getElementById('clear-all').click();
+    return waitFor(function () { return doc.getElementById('confirm-dialog').open; }, 'confirmation').then(function () {
+      eq(w.StudyTrackApp.store.getData().assignments.length, 8, 'nothing cleared before confirming');
+      doc.getElementById('confirm-ok').click();
+      return waitFor(function () { return w.StudyTrackApp.store.getData().assignments.length === 0; }, 'data cleared');
+    }).then(function () {
+      eq(localStorage.getItem(UI_KEY), null, 'stored data removed'); eq(doc.getElementById('greeting').textContent, 'Hi there');
+    });
+  }));
+
+  /* ---------- run and report ---------- */
+  function addRow(n, name, ok, detail) {
+    var tr = document.createElement('tr'); tr.className = ok ? 'pass' : 'fail';
+    [String(n), name, ok ? 'PASS' : 'FAIL', detail || ''].forEach(function (text, i) {
+      var td = document.createElement('td');
+      if (i === 2) { td.className = 'result'; } if (i === 3) { td.className = 'detail'; }
+      td.textContent = text; tr.appendChild(td);
+    });
+    document.getElementById('results').appendChild(tr);
+  }
+
+  function runAll() {
+    var passed = 0, index = 0;
+    return tests.reduce(function (chain, t) {
+      return chain.then(function () {
+        index += 1; var n = index;
+        return Promise.resolve().then(t.fn).then(function () { passed += 1; addRow(n, t.name, true); },
+          function (e) { addRow(n, t.name, false, e && e.message ? e.message : String(e)); });
+      });
+    }, Promise.resolve()).then(function () {
+      var summary = passed + ' of ' + tests.length + ' checks passed' + (passed === tests.length ? ' - ALL PASS' : ' - SOME FAILED');
+      document.getElementById('summary').textContent = summary;
+      document.title = 'StudyTrack checks: ' + summary;
+      document.body.setAttribute('data-done', passed === tests.length ? 'pass' : 'fail');
+      localStorage.removeItem(LOGIC_KEY); localStorage.removeItem(UI_KEY);
+    });
+  }
+  runAll();
+})();
+</script>
+</body>
+</html>

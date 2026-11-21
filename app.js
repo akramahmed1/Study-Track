@@ -28,6 +28,18 @@
       Array.isArray(d.courses) && Array.isArray(d.assignments);
   }
 
+  /* Test support: tests/tests.html opens the real page in an iframe named
+   * "studytrack-test-key:studytrack.test.<something>" so the page uses a separate storage key and
+   * never touches real records. Only keys starting with "studytrack.test." are accepted, and a
+   * normal browser tab has an empty window name, so this does nothing in normal use. */
+  function testKeyFromWindowName() {
+    var prefix = 'studytrack-test-key:';
+    var name = (typeof global.name === 'string') ? global.name : '';
+    if (name.indexOf(prefix) !== 0) { return null; }
+    var key = name.slice(prefix.length);
+    return /^studytrack\.test\.[A-Za-z0-9._-]+$/.test(key) ? key : null;
+  }
+
   /* Storage module. Every read and write is wrapped in try/catch.
    * options.key      - localStorage key (tests use a separate one)
    * options.storage  - object with getItem/setItem/removeItem (tests can inject a failing one)
@@ -37,7 +49,7 @@
    * is silently lost or overwritten. clearAll() is the only way to lift a 'corrupt' halt. */
   function createStore(options) {
     options = options || {};
-    var key = options.key || global.STUDYTRACK_KEY || DEFAULT_KEY;
+    var key = options.key || global.STUDYTRACK_KEY || testKeyFromWindowName() || DEFAULT_KEY;
     var data = defaultData();
     var halted = false;
     var haltReason = null; // 'corrupt' | 'unavailable' | 'save-failed'
