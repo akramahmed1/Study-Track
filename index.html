@@ -46,21 +46,7 @@
         </ul>
       </section>
 
-      <section aria-labelledby="courses-heading">
-        <h2 id="courses-heading" class="section-label">Courses</h2>
-        <form id="course-form" class="inline-form" novalidate>
-          <label for="course-name">New course name</label>
-          <div class="field-row">
-            <input id="course-name" name="course-name" type="text" maxlength="60" autocomplete="off" aria-describedby="course-error">
-            <button type="submit" class="btn btn-strong">Add course</button>
-          </div>
-          <p id="course-error" class="field-error" role="alert"></p>
-        </form>
-        <p id="no-courses" class="empty">No courses yet. Add one above before creating assignments.</p>
-        <ul id="course-list" class="course-list"></ul>
-        <p id="course-message" class="field-error" role="alert"></p>
-      </section>
-
+      <div class="dash-grid">
       <section aria-labelledby="list-heading">
         <div class="section-head">
           <h2 id="list-heading" class="section-label">Assignments</h2>
@@ -83,6 +69,22 @@
         <p id="no-match" class="empty" hidden>No assignments match this filter.</p>
         <ul id="assignment-list" class="assignment-list"></ul>
       </section>
+
+      <section aria-labelledby="courses-heading">
+        <h2 id="courses-heading" class="section-label">Courses</h2>
+        <form id="course-form" class="inline-form" novalidate>
+          <label for="course-name">New course name</label>
+          <div class="field-row">
+            <input id="course-name" name="course-name" type="text" maxlength="60" autocomplete="off" aria-describedby="course-error">
+            <button type="submit" class="btn btn-strong">Add course</button>
+          </div>
+          <p id="course-error" class="field-error" role="alert"></p>
+        </form>
+        <p id="no-courses" class="empty">No courses yet. Add one above before creating assignments.</p>
+        <ul id="course-list" class="course-list"></ul>
+        <p id="course-message" class="field-error" role="alert"></p>
+      </section>
+      </div>
 
       <p class="note">
         Reminders only work while this page is open. Always rely on your official course deadlines.

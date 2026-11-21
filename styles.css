@@ -140,7 +140,7 @@ input[aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
 .assignment-title { font-weight: 600; overflow-wrap: anywhere; }
 .assignment-meta { color: var(--grey); font-size: 0.95rem; overflow-wrap: anywhere; }
 .status {
-  justify-self: start; font-size: 0.9rem; font-weight: 700; padding: 0 0.5rem;
+  justify-self: start; font-size: 0.95rem; font-weight: 700; padding: 0 0.5rem;
   border: 2px solid var(--grey); border-radius: 999px; color: var(--graphite);
 }
 .status-overdue { border-color: var(--graphite); border-width: 3px; }
@@ -181,4 +181,18 @@ input[aria-invalid="true"] { border-color: var(--graphite); border-width: 3px; }
 
 /* Settings */
 .storage-note { border: 2px solid var(--grey); border-radius: 6px; padding: 0.75rem 1rem; margin: 0 0 0.5rem; }
-.header-inner .btn { min-height: 2.5rem; padding: 0.25rem 0.9rem; }
+.header-inner .btn { padding: 0.25rem 0.9rem; }
+
+/* Progress bar with a visible boundary (3:1 against white) */
+.course-progress { border: 2px solid var(--grey); border-radius: 999px; background: var(--paper); overflow: hidden; }
+.course-progress::-webkit-progress-bar { background: var(--paper); }
+.course-progress::-webkit-progress-value { background: var(--graphite); }
+.course-progress::-moz-progress-bar { background: var(--graphite); }
+
+/* Laptop layout: assignments wide on the left, courses on the right */
+@media (min-width: 60rem) {
+  .dash-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 0 2rem; align-items: start; }
+}
+
+/* Date-time pickers: keep the focus ring when focus is on the calendar button inside the field */
+input[type="datetime-local"]:focus-within { outline: 3px solid var(--graphite); outline-offset: 2px; }
